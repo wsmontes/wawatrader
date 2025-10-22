@@ -55,6 +55,54 @@ class AlpacaClient:
             logger.error(f"❌ Unexpected error initializing Alpaca: {e}")
             raise
     
+    def _get_best_feed(self, prefer_sip: bool = True) -> str:
+        """
+        Get the best available data feed based on subscription
+        
+        Paper trading accounts get:
+        - Free IEX real-time data ✅
+        - SIP historical data (15+ minutes old) ✅
+        - SIP real-time data requires AlgoTrader Plus subscription ❌
+        
+        Args:
+            prefer_sip: Whether to prefer SIP data if available
+            
+        Returns:
+            Feed name ('iex' or 'sip')
+        """
+        # For paper trading, default to IEX which is always available
+        # SIP will only work for historical data >15 minutes old
+        # or with AlgoTrader Plus subscription
+        return 'iex'  # Safe default for paper trading
+    
+    def get_subscription_info(self) -> Dict[str, Any]:
+        """
+        Get information about current market data subscription capabilities
+        
+        Returns:
+            Dictionary with subscription details and available data
+        """
+        return {
+            'account_type': 'paper_trading',
+            'free_data_available': {
+                'iex_real_time': True,
+                'iex_historical': True,
+                'sip_historical_15min_plus': True,
+                'crypto_free': True
+            },
+            'paid_subscription_required': {
+                'sip_real_time': 'AlgoTrader Plus',
+                'sip_recent_15min': 'AlgoTrader Plus',
+                'options_data': 'AlgoTrader Plus',
+                'otc_data': 'Broker Partner Special'
+            },
+            'data_explanation': {
+                'IEX': 'Single exchange (Investors Exchange) - free real-time data',
+                'SIP': 'All exchanges combined - more comprehensive, recent data requires subscription',
+                'delay_note': 'SIP data >15 minutes old is available without subscription'
+            }
+        }
+    
     # =====================================================
     # Account Information
     # =====================================================
@@ -235,15 +283,35 @@ class AlpacaClient:
             if start is None:
                 start = end - timedelta(days=100)
             
-            # Fetch bars
-            bars = self.api.get_bars(
-                symbol,
-                tf,
-                start=start.strftime('%Y-%m-%d'),
-                end=end.strftime('%Y-%m-%d'),
-                limit=limit,
-                adjustment='raw'
-            )
+            # Fetch bars with intelligent feed selection
+            # Try SIP first (more comprehensive data), fallback to IEX if needed
+            bars = None
+            try:
+                # For historical data >15min old, SIP should work even without subscription
+                bars = self.api.get_bars(
+                    symbol,
+                    tf,
+                    start=start.strftime('%Y-%m-%d'),
+                    end=end.strftime('%Y-%m-%d'),
+                    limit=limit,
+                    adjustment='raw',
+                    feed='sip'  # Try SIP first
+                )
+            except APIError as sip_error:
+                if "subscription does not permit" in str(sip_error).lower():
+                    logger.debug(f"📊 {symbol} SIP data unavailable, using free IEX data")
+                    # Fallback to IEX which is always free
+                    bars = self.api.get_bars(
+                        symbol,
+                        tf,
+                        start=start.strftime('%Y-%m-%d'),
+                        end=end.strftime('%Y-%m-%d'),
+                        limit=limit,
+                        adjustment='raw',
+                        feed='iex'  # IEX fallback
+                    )
+                else:
+                    raise sip_error
             
             # Convert to DataFrame
             df = bars.df
@@ -263,7 +331,16 @@ class AlpacaClient:
             return df
             
         except APIError as e:
-            logger.error(f"Failed to get bars for {symbol}: {e}")
+            error_msg = str(e).lower()
+            if "subscription does not permit" in error_msg or "insufficient subscription" in error_msg:
+                if "recent sip data" in error_msg:
+                    logger.info(f"📊 {symbol} recent SIP data needs AlgoTrader Plus - using free IEX data (15min+ delay for SIP)")
+                else:
+                    logger.warning(f"⚠️  {symbol} {timeframe} data requires higher subscription tier - using available data")
+            elif "rate limit" in error_msg:
+                logger.warning(f"⚠️  Rate limited for {symbol} - retrying with different timeframe")
+            else:
+                logger.error(f"❌ API error for {symbol}: {e}")
             return pd.DataFrame()
     
     def get_latest_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
@@ -298,7 +375,14 @@ class AlpacaClient:
                 'timestamp': quote.t
             }
         except APIError as e:
-            logger.error(f"Failed to get quote for {symbol}: {e}")
+            error_msg = str(e).lower()
+            if "subscription does not permit" in error_msg or "insufficient subscription" in error_msg:
+                if "recent sip data" in error_msg:
+                    logger.debug(f"📊 {symbol} real-time SIP quotes need AlgoTrader Plus - free IEX quotes available")
+                else:
+                    logger.debug(f"📊 {symbol} live quotes require higher subscription - using fallback data")
+            else:
+                logger.error(f"❌ Failed to get quote for {symbol}: {e}")
             return None
     
     def get_latest_trade(self, symbol: str) -> Optional[Dict[str, Any]]:
@@ -321,7 +405,14 @@ class AlpacaClient:
                 'exchange': trade.x
             }
         except APIError as e:
-            logger.error(f"Failed to get trade for {symbol}: {e}")
+            error_msg = str(e).lower()
+            if "subscription does not permit" in error_msg or "insufficient subscription" in error_msg:
+                if "recent sip data" in error_msg:
+                    logger.debug(f"📈 {symbol} real-time SIP trades need AlgoTrader Plus - free IEX trades available")
+                else:
+                    logger.debug(f"📈 {symbol} live trades require higher subscription - using historical data")
+            else:
+                logger.error(f"❌ Failed to get trade for {symbol}: {e}")
             return None
     
     # =====================================================

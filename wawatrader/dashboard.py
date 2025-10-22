@@ -1,21 +1,30 @@
 """
-Performance Dashboard
+WawaTrader Beta Dashboard
 
-Real-time monitoring interface for WawaTrader using Plotly Dash.
+Elite daytrading interface with comprehensive LLM transparency and real-time market intelligence.
+Inspired by TradingView Pro, Bloomberg Terminal, and Interactive Brokers TWS.
 
 Features:
-- Live portfolio value tracking
-- Open positions display
-- P&L metrics (daily, total, by symbol)
-- Trade history table
-- Technical indicator charts
-- Risk metrics monitoring
+- Dark professional theme optimized for trading
+- Real-time LLM thought process visualization
+- Advanced candlestick charts with AI annotations
+- Market screener with opportunity detection
+- Performance analytics with AI decision tracking
+- Interactive conversation analysis
+- Professional order management interface
+- Alert system with sound notifications
+
+Architecture:
+- Header Bar: Status, P&L, System Health
+- Main Panel: Live charts with LLM reasoning overlay
+- Side Panels: Market intel, positions, conversations
+- Bottom Bar: Performance metrics, alerts
 
 Usage:
     from wawatrader.dashboard import Dashboard
     
     dash = Dashboard()
-    dash.run(port=8050)
+    dash.app.run(port=8050)
 """
 
 import pandas as pd
@@ -26,14 +35,16 @@ from typing import Dict, List, Optional, Any
 import json
 from pathlib import Path
 from loguru import logger
+import asyncio
 
 try:
-    from dash import Dash, html, dcc, Input, Output, dash_table
+    from dash import Dash, html, dcc, Input, Output, dash_table, callback, ctx
     import dash_bootstrap_components as dbc
+    import plotly.express as px
     DASH_AVAILABLE = True
 except ImportError:
     logger.warning("Dash not installed. Dashboard features unavailable.")
-    logger.info("Install with: pip install dash dash-bootstrap-components")
+    logger.info("Install with: pip install dash dash-bootstrap-components plotly")
     DASH_AVAILABLE = False
 
 from wawatrader.alpaca_client import get_client
@@ -42,1078 +53,1153 @@ from wawatrader.indicators import analyze_dataframe, get_latest_signals
 
 class Dashboard:
     """
-    Real-time trading performance dashboard.
+    Elite professional trading dashboard with LLM transparency.
     
-    Displays:
-    - Portfolio value and P&L
-    - Current positions
-    - Trade history
-    - Performance charts
-    - Risk metrics
+    Designed for serious daytraders who need:
+    - Maximum information density
+    - Real-time LLM decision insights
+    - Professional dark theme
+    - Responsive layout that fits any screen
+    - Advanced analytics and monitoring
     """
     
     def __init__(self, data_dir: str = "trading_data"):
-        """
-        Initialize dashboard.
-        
-        Args:
-            data_dir: Directory containing trading data/logs
-        """
+        """Initialize professional dashboard"""
         if not DASH_AVAILABLE:
-            raise ImportError("Dash is required for dashboard. Install with: pip install dash dash-bootstrap-components")
+            raise ImportError("Dash required: pip install dash dash-bootstrap-components plotly")
         
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(exist_ok=True)
         
-        # Initialize Alpaca client
+        # Initialize components
         self.alpaca = get_client()
         
-        # Create Dash app
+        # Create Dash app with custom styling
         self.app = Dash(
             __name__,
-            external_stylesheets=[dbc.themes.BOOTSTRAP],
-            title="WawaTrader Dashboard"
+            external_stylesheets=[
+                dbc.themes.CYBORG,  # Dark base theme
+                "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap",
+                "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+            ],
+            title="WawaTrader Beta",
+            meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}]
         )
         
-        # Build layout
-        self._build_layout()
+        # Add custom CSS
+        self._add_custom_styles()
         
-        # Register callbacks
-        self._register_callbacks()
+        # Build professional layout
+        self._build_professional_layout()
         
-        logger.info("Dashboard initialized")
+        # Register advanced callbacks
+        self._register_professional_callbacks()
+        
+        logger.info("🚀 Professional Dashboard initialized")
     
-    def _build_layout(self):
-        """Build dashboard layout"""
+    def _add_custom_styles(self):
+        """Add custom CSS for professional trading interface"""
+        self.app.index_string = '''
+        <!DOCTYPE html>
+        <html>
+            <head>
+                {%metas%}
+                <title>{%title%}</title>
+                {%favicon%}
+                {%css%}
+                <style>
+                    /* Professional Dark Trading Theme */
+                    :root {
+                        --bg-primary: #0a0a0a;
+                        --bg-secondary: #1a1a1a;
+                        --bg-tertiary: #2a2a2a;
+                        --border-color: #333333;
+                        --text-primary: #ffffff;
+                        --text-secondary: #cccccc;
+                        --text-muted: #888888;
+                        --accent-green: #00ff88;
+                        --accent-red: #ff4444;
+                        --accent-blue: #00aaff;
+                        --accent-orange: #ffaa00;
+                        --accent-purple: #aa44ff;
+                        --glass-bg: rgba(42, 42, 42, 0.8);
+                        --glass-border: rgba(255, 255, 255, 0.1);
+                    }
+                    
+                    body {
+                        background: var(--bg-primary);
+                        color: var(--text-primary);
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        margin: 0;
+                        padding: 0;
+                    }
+                    
+                    /* Professional Container */
+                    .professional-container {
+                        background: var(--bg-primary);
+                        min-height: 100vh;
+                        padding: 0;
+                        max-width: 100% !important;
+                        margin: 0;
+                    }
+                    
+                    /* Glass Cards */
+                    .glass-card {
+                        background: var(--glass-bg);
+                        border: 1px solid var(--glass-border);
+                        border-radius: 8px;
+                        backdrop-filter: blur(10px);
+                        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+                    }
+                    
+                    /* Header Bar */
+                    .header-bar {
+                        background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
+                        border-bottom: 2px solid var(--accent-blue);
+                        padding: 14px 24px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        position: sticky;
+                        top: 0;
+                        z-index: 1000;
+                        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+                        min-height: 60px;
+                    }
+                    
+                    .header-title {
+                        font-size: 24px;
+                        font-weight: bold;
+                        color: var(--accent-blue);
+                        text-shadow: 0 0 10px rgba(0, 170, 255, 0.3);
+                    }
+                    
+                    .header-status {
+                        display: flex;
+                        gap: 20px;
+                        align-items: center;
+                    }
+                    
+                    .status-badge {
+                        padding: 4px 12px;
+                        border-radius: 20px;
+                        font-size: 12px;
+                        font-weight: 500;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    }
+                    
+                    .status-live {
+                        background: linear-gradient(45deg, var(--accent-green), #00cc66);
+                        color: var(--bg-primary);
+                        animation: pulse 2s infinite;
+                    }
+                    
+                    @keyframes pulse {
+                        0%, 100% { opacity: 1; }
+                        50% { opacity: 0.7; }
+                    }
+                    
+                    /* Main Grid Layout - Optimized for laptop screens */
+                    .main-grid {
+                        display: grid;
+                        grid-template-columns: minmax(300px, 24%) 1fr minmax(260px, 19%);
+                        grid-template-rows: minmax(380px, 60%) minmax(200px, 40%);
+                        gap: 12px;
+                        padding: 12px;
+                        height: calc(100vh - 90px);
+                        max-width: 100vw;
+                        overflow: hidden;
+                    }
+                    
+                    @media (max-width: 1400px) {
+                        .main-grid {
+                            grid-template-columns: minmax(280px, 25%) 1fr minmax(240px, 21%);
+                            grid-template-rows: minmax(340px, 62%) minmax(180px, 38%);
+                            gap: 10px;
+                            padding: 10px;
+                        }
+                    }
+                    
+                    @media (max-width: 1200px) {
+                        .main-grid {
+                            grid-template-columns: 1fr 1fr;
+                            grid-template-rows: minmax(300px, 40%) minmax(200px, 30%) minmax(200px, 30%);
+                            height: auto;
+                        }
+                    }
+                    
+                    @media (max-width: 768px) {
+                        .main-grid {
+                            grid-template-columns: 1fr;
+                            grid-template-rows: auto;
+                            padding: 8px;
+                            gap: 8px;
+                            height: auto;
+                        }
+                    }
+                    
+                    /* LLM Mind Panel */
+                    .llm-mind {
+                        grid-column: 1;
+                        grid-row: 1 / -1;
+                        background: var(--glass-bg);
+                        border: 1px solid var(--glass-border);
+                        border-radius: 8px;
+                        padding: 20px;
+                        overflow: hidden;
+                        min-height: 0;
+                        max-height: calc(100vh - 130px);
+                        position: relative;
+                        display: flex;
+                        flex-direction: column;
+                    }
+                    
+                    .llm-thought {
+                        background: rgba(0, 170, 255, 0.1);
+                        border-left: 3px solid var(--accent-blue);
+                        padding: 12px;
+                        margin: 8px 0;
+                        border-radius: 0 6px 6px 0;
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 11px;
+                        line-height: 1.4;
+                        word-wrap: break-word;
+                        overflow-wrap: break-word;
+                        white-space: pre-wrap;
+                        /* Removed max-height to show full text */
+                    }
+                    
+                    .confidence-bar {
+                        background: var(--bg-tertiary);
+                        height: 6px;
+                        border-radius: 3px;
+                        margin: 8px 0;
+                        overflow: hidden;
+                    }
+                    
+                    .confidence-fill {
+                        height: 100%;
+                        border-radius: 3px;
+                        transition: width 0.3s ease;
+                    }
+                    
+                    /* LLM Mind Panel specific styling */
+                    .llm-mind-header {
+                        position: sticky;
+                        top: 0;
+                        background: var(--glass-bg);
+                        padding-bottom: 8px;
+                        margin-bottom: 12px;
+                        border-bottom: 1px solid var(--glass-border);
+                        z-index: 10;
+                    }
+                    
+                    .llm-thoughts-container {
+                        height: calc(100% - 60px);
+                        overflow-y: auto;
+                        overflow-x: hidden;
+                        padding-right: 8px;
+                        scrollbar-width: thin;
+                        scrollbar-color: var(--accent-blue) var(--bg-secondary);
+                    }
+                    
+                    .llm-thoughts-container::-webkit-scrollbar {
+                        width: 8px;
+                    }
+                    
+                    .llm-thoughts-container::-webkit-scrollbar-track {
+                        background: var(--bg-secondary);
+                        border-radius: 4px;
+                    }
+                    
+                    .llm-thoughts-container::-webkit-scrollbar-thumb {
+                        background: var(--accent-blue);
+                        border-radius: 4px;
+                        border: 1px solid var(--bg-secondary);
+                    }
+                    
+                    .llm-thoughts-container::-webkit-scrollbar-thumb:hover {
+                        background: var(--accent-green);
+                    }
+                    
+                    /* Chart Panel */
+                    .chart-panel {
+                        background: var(--glass-bg);
+                        border: 1px solid var(--glass-border);
+                        border-radius: 8px;
+                        overflow: hidden;
+                        min-width: 0;
+                        min-height: 0;
+                        grid-column: 2;
+                        grid-row: 1;
+                    }
+                    
+                    /* Market Intel */
+                    .market-intel {
+                        background: var(--glass-bg);
+                        border: 1px solid var(--glass-border);
+                        border-radius: 8px;
+                        padding: 20px;
+                        overflow-y: auto;
+                        min-height: 0;
+                        grid-column: 3;
+                        grid-row: 1 / -1;
+                        max-height: calc(100vh - 130px);
+                    }
+                    
+                    /* Metric Cards - Optimized for laptop screens */
+                    .metric-card {
+                        background: var(--bg-secondary);
+                        border: 1px solid var(--border-color);
+                        border-radius: 6px;
+                        padding: 8px 12px;
+                        margin: 4px 0;
+                        transition: all 0.2s ease;
+                        min-height: 50px;
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: center;
+                    }
+                    
+                    .metric-card:hover {
+                        border-color: var(--accent-blue);
+                        box-shadow: 0 2px 8px rgba(0, 170, 255, 0.2);
+                    }
+                    
+                    .metric-value {
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 16px;
+                        font-weight: bold;
+                        margin: 2px 0;
+                        line-height: 1.2;
+                    }
+                    
+                    .metric-label {
+                        font-size: 10px;
+                        color: var(--text-muted);
+                        text-transform: uppercase;
+                        letter-spacing: 0.3px;
+                        margin-bottom: 2px;
+                    }
+                    
+                    /* Compact layout for bottom panels */
+                    .compact-grid {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 8px;
+                        margin-bottom: 12px;
+                    }
+                    
+                    .compact-metric {
+                        background: var(--bg-secondary);
+                        border: 1px solid var(--border-color);
+                        border-radius: 4px;
+                        padding: 6px 8px;
+                        text-align: center;
+                    }
+                    
+                    .compact-value {
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 14px;
+                        font-weight: bold;
+                        margin: 1px 0;
+                    }
+                    
+                    .compact-label {
+                        font-size: 9px;
+                        color: var(--text-muted);
+                        text-transform: uppercase;
+                        letter-spacing: 0.2px;
+                    }
+                    
+                    .positive { color: var(--accent-green); }
+                    .negative { color: var(--accent-red); }
+                    .neutral { color: var(--text-secondary); }
+                    
+                    /* Scrollbars */
+                    ::-webkit-scrollbar {
+                        width: 8px;
+                    }
+                    
+                    ::-webkit-scrollbar-track {
+                        background: var(--bg-secondary);
+                    }
+                    
+                    ::-webkit-scrollbar-thumb {
+                        background: var(--border-color);
+                        border-radius: 4px;
+                    }
+                    
+                    ::-webkit-scrollbar-thumb:hover {
+                        background: var(--accent-blue);
+                    }
+                    
+                    /* Tables */
+                    .professional-table {
+                        background: var(--bg-secondary);
+                        color: var(--text-primary);
+                        border: none;
+                    }
+                    
+                    .professional-table th {
+                        background: var(--bg-tertiary);
+                        color: var(--text-primary);
+                        border: none;
+                        font-weight: 600;
+                        font-size: 11px;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    }
+                    
+                    .professional-table td {
+                        background: var(--bg-secondary);
+                        color: var(--text-primary);
+                        border: none;
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 12px;
+                    }
+                    
+                    /* Alerts */
+                    .alert-panel {
+                        position: fixed;
+                        top: 80px;
+                        right: 20px;
+                        width: 300px;
+                        z-index: 2000;
+                    }
+                    
+                    .alert-item {
+                        background: var(--glass-bg);
+                        border: 1px solid var(--accent-orange);
+                        border-radius: 6px;
+                        padding: 12px;
+                        margin: 8px 0;
+                        animation: slideIn 0.3s ease;
+                    }
+                    
+                    @keyframes slideIn {
+                        from { transform: translateX(100%); }
+                        to { transform: translateX(0); }
+                    }
+                    
+                    /* Responsive Design */
+                    /* Improved responsive layout for LLM positioning */
+                    @media (max-width: 1200px) {
+                        .llm-mind {
+                            grid-column: 1;
+                            grid-row: 1;
+                            max-height: 350px;
+                        }
+                        
+                        .chart-panel {
+                            grid-column: 2;
+                            grid-row: 1;
+                        }
+                        
+                        .market-intel {
+                            grid-column: 1 / -1;
+                            grid-row: 2;
+                            max-height: 300px;
+                        }
+                    }
+                    
+                    @media (max-width: 768px) {
+                        .main-grid {
+                            grid-template-columns: 1fr;
+                            grid-template-rows: auto auto auto auto auto;
+                            padding: 8px;
+                            gap: 8px;
+                        }
+                        
+                        .header-bar {
+                            padding: 8px 12px;
+                        }
+                        
+                        .header-title {
+                            font-size: 18px;
+                        }
+                        
+                        .llm-mind, .market-intel {
+                            padding: 12px;
+                            grid-column: 1;
+                            grid-row: auto;
+                            max-height: 250px;
+                        }
+                        
+                        .chart-panel {
+                            grid-column: 1;
+                            grid-row: auto;
+                            min-height: 300px;
+                        }
+                    }
+                </style>
+            </head>
+            <body>
+                {%app_entry%}
+                <footer>
+                    {%config%}
+                    {%scripts%}
+                    {%renderer%}
+                </footer>
+            </body>
+        </html>
+        '''
+    
+    def _build_professional_layout(self):
+        """Build the professional trading interface layout"""
         
-        self.app.layout = dbc.Container([
-            # Header
-            dbc.Row([
-                dbc.Col([
-                    html.H1("🤖 WawaTrader Dashboard", className="text-center mb-4"),
-                    html.Hr()
-                ])
-            ]),
-            
-            # Auto-refresh interval
+        self.app.layout = html.Div([
+            # Auto-refresh components
             dcc.Interval(
-                id='interval-component',
-                interval=30*1000,  # Update every 30 seconds
+                id='main-interval',
+                interval=5000,  # 5 seconds for professional real-time updates
                 n_intervals=0
             ),
             
-            # Account Summary Cards
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.H4("Portfolio Value", className="card-title"),
-                            html.H2(id="portfolio-value", children="$0.00", className="text-primary"),
-                            html.P(id="portfolio-change", children="+$0.00 (0.00%)", className="text-success")
-                        ])
-                    ])
-                ], width=3),
+            dcc.Interval(
+                id='llm-interval', 
+                interval=2000,  # 2 seconds for LLM thoughts
+                n_intervals=0
+            ),
+            
+            # Header Bar
+            html.Div([
+                html.Div([
+                    html.I(className="fas fa-robot", style={"marginRight": "8px"}),
+                    "WawaTrader Beta"
+                ], className="header-title"),
                 
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.H4("Today's P&L", className="card-title"),
-                            html.H2(id="daily-pnl", children="$0.00", className="text-primary"),
-                            html.P(id="daily-pnl-pct", children="0.00%", className="text-muted")
+                html.Div([
+                    html.Div("LIVE", className="status-badge status-live"),
+                    html.Div(id="system-time", className="status-badge", 
+                            style={"background": "var(--bg-tertiary)", "color": "var(--text-secondary)"}),
+                    html.Div(id="pnl-header", className="status-badge",
+                            style={"background": "var(--bg-tertiary)", "fontFamily": "JetBrains Mono"}),
+                ], className="header-status")
+            ], className="header-bar"),
+            
+            # Main Grid Layout
+            html.Div([
+                # LLM Mind Panel (Left)
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-brain", style={"marginRight": "8px", "color": "var(--accent-blue)"}),
+                        html.H5("LLM Data", style={"margin": "0", "color": "var(--accent-blue)", "fontSize": "14px"}),
+                        html.Div("🧠", style={"marginLeft": "auto", "fontSize": "16px"})
+                    ], className="llm-mind-header", style={"display": "flex", "alignItems": "center"}),
+                    
+                    html.Div(id="llm-thoughts", className="llm-thoughts-container", children=[
+                        html.Div([
+                            html.Div("💭 Analyzing market conditions...", className="llm-thought"),
+                            html.Div([
+                                html.Div("Confidence", style={"fontSize": "10px", "color": "var(--text-muted)", "marginBottom": "4px"}),
+                                html.Div(className="confidence-bar", children=[
+                                    html.Div(className="confidence-fill", style={
+                                        "width": "75%", 
+                                        "background": "linear-gradient(90deg, var(--accent-green), var(--accent-blue))"
+                                    })
+                                ])
+                            ], style={"marginTop": "8px"})
                         ])
                     ])
-                ], width=3),
+                ], className="llm-mind"),
                 
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.H4("Open Positions", className="card-title"),
-                            html.H2(id="position-count", children="0", className="text-primary"),
-                            html.P(id="position-value", children="$0.00", className="text-muted")
-                        ])
-                    ])
-                ], width=3),
-                
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.H4("Buying Power", className="card-title"),
-                            html.H2(id="buying-power", children="$0.00", className="text-primary"),
-                            html.P(id="cash-value", children="Cash: $0.00", className="text-muted")
-                        ])
-                    ])
-                ], width=3),
-            ], className="mb-4"),
-            
-            # Charts Row
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader(html.H5("Portfolio Value Over Time")),
-                        dbc.CardBody([
-                            dcc.Graph(id="portfolio-chart")
-                        ])
-                    ])
-                ], width=8),
-                
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader(html.H5("Position Allocation")),
-                        dbc.CardBody([
-                            dcc.Graph(id="allocation-chart")
-                        ])
-                    ])
-                ], width=4),
-            ], className="mb-4"),
-            
-            # Positions Table
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader(html.H5("Current Positions")),
-                        dbc.CardBody([
-                            html.Div(id="positions-table")
-                        ])
-                    ])
-                ])
-            ], className="mb-4"),
-            
-            # Trade History
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader(html.H5("Recent Trades")),
-                        dbc.CardBody([
-                            html.Div(id="trades-table")
-                        ])
-                    ])
-                ])
-            ], className="mb-4"),
-            
-            # LLM Intelligence Section
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader([
-                            html.H5("🤖 LLM Intelligence & Conversations"),
-                            dbc.Badge("Live AI Analysis", color="success", className="ms-2")
-                        ]),
-                        dbc.CardBody([
-                            dbc.Tabs([
-                                dbc.Tab(label="Market Intelligence", tab_id="market-intel"),
-                                dbc.Tab(label="LLM Conversations", tab_id="llm-conversations"),
-                                dbc.Tab(label="Trading Plan", tab_id="trading-plan")
-                            ], id="llm-tabs", active_tab="market-intel"),
-                            html.Div(id="llm-content")
-                        ])
-                    ])
-                ], width=12)
-            ], className="mb-4"),
-
-            # Technical Indicators - Improved Layout
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader([
-                            html.H5("📈 Technical Analysis Dashboard"),
-                            dcc.Dropdown(
-                                id='symbol-dropdown',
-                                options=[],
-                                value=None,
-                                placeholder="Select a symbol for detailed analysis",
-                                style={'width': '300px', 'display': 'inline-block'}
-                            )
-                        ]),
-                        dbc.CardBody([
-                            # Indicators Overview Cards
-                            dbc.Row([
-                                dbc.Col([
-                                    dbc.Card([
-                                        dbc.CardBody([
-                                            html.H6("RSI", className="card-subtitle"),
-                                            html.H4(id="rsi-value", className="text-primary"),
-                                            html.Small(id="rsi-signal", className="text-muted")
-                                        ])
-                                    ], color="light")
-                                ], width=2),
-                                dbc.Col([
-                                    dbc.Card([
-                                        dbc.CardBody([
-                                            html.H6("MACD", className="card-subtitle"),
-                                            html.H4(id="macd-value", className="text-primary"),
-                                            html.Small(id="macd-signal", className="text-muted")
-                                        ])
-                                    ], color="light")
-                                ], width=2),
-                                dbc.Col([
-                                    dbc.Card([
-                                        dbc.CardBody([
-                                            html.H6("Volume", className="card-subtitle"),
-                                            html.H4(id="volume-ratio", className="text-primary"),
-                                            html.Small(id="volume-signal", className="text-muted")
-                                        ])
-                                    ], color="light")
-                                ], width=2),
-                                dbc.Col([
-                                    dbc.Card([
-                                        dbc.CardBody([
-                                            html.H6("Trend", className="card-subtitle"),
-                                            html.H4(id="trend-value", className="text-primary"),
-                                            html.Small(id="trend-signal", className="text-muted")
-                                        ])
-                                    ], color="light")
-                                ], width=2),
-                                dbc.Col([
-                                    dbc.Card([
-                                        dbc.CardBody([
-                                            html.H6("Volatility", className="card-subtitle"),
-                                            html.H4(id="volatility-value", className="text-primary"),
-                                            html.Small(id="volatility-signal", className="text-muted")
-                                        ])
-                                    ], color="light")
-                                ], width=2),
-                                dbc.Col([
-                                    dbc.Card([
-                                        dbc.CardBody([
-                                            html.H6("AI Confidence", className="card-subtitle"),
-                                            html.H4(id="ai-confidence", className="text-primary"),
-                                            html.Small(id="ai-action", className="text-muted")
-                                        ])
-                                    ], color="light")
-                                ], width=2),
-                            ], className="mb-3"),
-                            # Full Chart
-                            dcc.Graph(id="indicators-chart", style={'height': '500px'})
-                        ])
-                    ])
-                ])
-            ], className="mb-4"),
-            
-            # Footer
-            dbc.Row([
-                dbc.Col([
-                    html.Hr(),
-                    html.P(
-                        f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                        id="last-update",
-                        className="text-center text-muted"
+                # Chart Panel (Center)
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-chart-candlestick", style={"marginRight": "8px", "color": "var(--accent-blue)"}),
+                        html.H5("AAPL - Live Trading Chart", style={"margin": "0", "color": "var(--accent-blue)", "fontSize": "14px"}),
+                        html.Div("📊 IEX Real-Time Data", style={"fontSize": "10px", "color": "var(--text-muted)", "marginLeft": "auto"})
+                    ], style={"display": "flex", "alignItems": "center", "padding": "12px 16px", "borderBottom": "1px solid var(--border-color)"}),
+                    
+                    dcc.Graph(
+                        id="main-chart",
+                        config={
+                            'displayModeBar': True,
+                            'displaylogo': False,
+                            'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d']
+                        },
+                        style={"height": "calc(100% - 50px)"}
                     )
-                ])
-            ])
+                ], className="chart-panel"),
+                
+                # Market Intel Panel (Right)
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-chart-line", style={"marginRight": "8px", "color": "var(--accent-green)"}),
+                        html.H5("Market Intel", style={"margin": "0", "color": "var(--accent-green)"})
+                    ], style={"display": "flex", "alignItems": "center", "marginBottom": "16px"}),
+                    
+                    html.Div(id="market-screener")
+                ], className="market-intel"),
+                
+                # Performance Panel (Bottom Left)
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-chart-area", style={"marginRight": "8px", "color": "var(--accent-orange)"}),
+                        html.H5("Performance", style={"margin": "0", "color": "var(--accent-orange)", "fontSize": "14px"})
+                    ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
+                    
+                    html.Div(id="performance-metrics", style={"overflowY": "auto", "height": "calc(100% - 40px)"})
+                ], className="glass-card", style={"gridColumn": "1", "gridRow": "2", "padding": "18px", "minHeight": "0"}),
+                
+                # Positions Panel (Bottom Center)  
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-briefcase", style={"marginRight": "8px", "color": "var(--accent-purple)"}),
+                        html.H5("Positions", style={"margin": "0", "color": "var(--accent-purple)", "fontSize": "14px"})
+                    ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
+                    
+                    html.Div(id="positions-panel", style={"overflowY": "auto", "height": "calc(100% - 40px)"})
+                ], className="glass-card", style={"gridColumn": "2", "gridRow": "2", "padding": "18px", "minHeight": "0"}),
+                
+                # Conversations Panel (Bottom Right)
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-robot", style={"marginRight": "8px", "color": "var(--accent-red)"}),
+                        html.H5("AI Decisions", style={"margin": "0", "color": "var(--accent-red)", "fontSize": "14px"})
+                    ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
+                    
+                    html.Div(id="conversations-panel", style={"overflowY": "auto", "height": "calc(100% - 40px)"})
+                ], className="glass-card", style={"gridColumn": "3", "gridRow": "2", "padding": "18px", "minHeight": "0"}),
+                
+            ], className="main-grid"),
             
-        ], fluid=True, style={"padding": "20px"})
+            # Alert Panel (Fixed position)
+            html.Div(id="alert-panel", className="alert-panel")
+            
+        ], className="professional-container")
     
-    def _register_callbacks(self):
-        """Register dashboard callbacks"""
+    def _register_professional_callbacks(self):
+        """Register callbacks for professional dashboard"""
         
         @self.app.callback(
-            [
-                Output("portfolio-value", "children"),
-                Output("portfolio-change", "children"),
-                Output("portfolio-change", "className"),
-                Output("daily-pnl", "children"),
-                Output("daily-pnl-pct", "children"),
-                Output("daily-pnl", "className"),
-                Output("position-count", "children"),
-                Output("position-value", "children"),
-                Output("buying-power", "children"),
-                Output("cash-value", "children"),
-                Output("last-update", "children"),
-            ],
-            [Input("interval-component", "n_intervals")]
+            [Output('system-time', 'children'),
+             Output('pnl-header', 'children'),
+             Output('pnl-header', 'style')],
+            [Input('main-interval', 'n_intervals')]
         )
-        def update_account_summary(n):
-            """Update account summary cards"""
+        def update_header(n):
+            """Update header with time and P&L"""
+            current_time = datetime.now().strftime("%H:%M:%S")
+            
             try:
+                # Get account info
                 account = self.alpaca.get_account()
                 
-                portfolio_value = float(account['portfolio_value'])
-                equity = float(account['equity'])
-                last_equity = float(account.get('last_equity', equity))
-                
-                # Calculate changes
-                total_change = equity - last_equity
-                total_change_pct = (total_change / last_equity * 100) if last_equity > 0 else 0
-                
-                # Daily P&L
-                daily_pnl = total_change
-                daily_pnl_pct = total_change_pct
-                
-                # Position info
-                positions = self.alpaca.get_positions()
-                position_count = len(positions)
-                position_value = sum(float(p.get('market_value', 0)) for p in positions)
-                
-                # Buying power
-                buying_power = float(account['buying_power'])
-                cash = float(account['cash'])
-                
-                # Formatting
-                pnl_class = "text-success" if daily_pnl >= 0 else "text-danger"
-                change_class = "text-success" if total_change >= 0 else "text-danger"
-                
-                return (
-                    f"${portfolio_value:,.2f}",
-                    f"{'+' if total_change >= 0 else ''}{total_change:,.2f} ({total_change_pct:+.2f}%)",
-                    change_class,
-                    f"${daily_pnl:+,.2f}",
-                    f"{daily_pnl_pct:+.2f}%",
-                    pnl_class,
-                    str(position_count),
-                    f"${position_value:,.2f}",
-                    f"${buying_power:,.2f}",
-                    f"Cash: ${cash:,.2f}",
-                    f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                )
-            except Exception as e:
-                logger.error(f"Error updating account summary: {e}")
-                return ("$0.00", "$0.00 (0.00%)", "text-muted", "$0.00", "0.00%", "text-muted", 
-                       "0", "$0.00", "$0.00", "Cash: $0.00", 
-                       f"Error: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        @self.app.callback(
-            Output("portfolio-chart", "figure"),
-            [Input("interval-component", "n_intervals")]
-        )
-        def update_portfolio_chart(n):
-            """Update portfolio value chart"""
-            try:
-                # Get portfolio history
-                history = self.alpaca.get_portfolio_history(
-                    period="1M",
-                    timeframe="1D"
-                )
-                
-                if history and 'timestamp' in history and 'equity' in history:
-                    df = pd.DataFrame({
-                        'timestamp': pd.to_datetime(history['timestamp'], unit='s'),
-                        'equity': history['equity']
-                    })
-                    
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=df['timestamp'],
-                        y=df['equity'],
-                        mode='lines',
-                        name='Portfolio Value',
-                        line=dict(color='#0d6efd', width=2),
-                        fill='tozeroy',
-                        fillcolor='rgba(13, 110, 253, 0.1)'
-                    ))
-                    
-                    fig.update_layout(
-                        title="Portfolio Value (Last 30 Days)",
-                        xaxis_title="Date",
-                        yaxis_title="Value ($)",
-                        hovermode='x unified',
-                        showlegend=False,
-                        margin=dict(l=40, r=40, t=40, b=40)
-                    )
-                    
-                    return fig
+                # Handle both dict and object responses
+                if isinstance(account, dict):
+                    equity = float(account.get('equity', 0))
+                    last_equity = float(account.get('last_equity', equity))
+                    buying_power = float(account.get('buying_power', 0))
                 else:
-                    # No data available
-                    return self._empty_chart("No portfolio history available")
-                    
+                    equity = float(account.equity)
+                    last_equity = float(account.last_equity)
+                    buying_power = float(account.buying_power)
+                
+                pnl = equity - last_equity
+                pnl_pct = (pnl / last_equity) * 100 if last_equity > 0 else 0
+                
+                pnl_text = f"P&L: {'+' if pnl >= 0 else ''}{pnl:,.2f} ({pnl_pct:+.2f}%)"
+                pnl_color = "var(--accent-green)" if pnl >= 0 else "var(--accent-red)"
+                
+                pnl_style = {
+                    "background": "var(--bg-tertiary)", 
+                    "fontFamily": "JetBrains Mono",
+                    "color": pnl_color,
+                    "fontWeight": "bold"
+                }
+                
+                return current_time, pnl_text, pnl_style
+                
             except Exception as e:
-                logger.error(f"Error updating portfolio chart: {e}")
-                return self._empty_chart(f"Error: {str(e)}")
+                logger.error(f"Error updating header: {e}")
+                return current_time, "P&L: --", {"background": "var(--bg-tertiary)", "color": "var(--text-muted)"}
         
         @self.app.callback(
-            Output("allocation-chart", "figure"),
-            [Input("interval-component", "n_intervals")]
+            Output('main-chart', 'figure'),
+            [Input('main-interval', 'n_intervals')]
         )
-        def update_allocation_chart(n):
-            """Update position allocation pie chart"""
+        def update_main_chart(n):
+            """Update main candlestick chart with professional styling"""
             try:
-                positions = self.alpaca.get_positions()
+                # Get price data for primary symbol (AAPL as example)
+                symbol = "AAPL"
                 
-                if not positions:
-                    return self._empty_chart("No open positions")
+                # Try to get recent data, fall back to daily data if subscription doesn't allow
+                bars = None
+                try:
+                    bars = self.alpaca.get_bars(symbol, limit=100, timeframe='1Hour')  # Use hourly instead of 5min
+                    if bars.empty:
+                        raise ValueError("Empty hourly data")
+                except Exception as api_error:
+                    logger.warning(f"Hourly data not available: {api_error}, trying daily data")
+                    try:
+                        bars = self.alpaca.get_bars(symbol, limit=50, timeframe='1Day')
+                        if bars.empty:
+                            raise ValueError("Empty daily data")
+                    except Exception as daily_error:
+                        logger.error(f"No data available: {daily_error}")
+                        return self._create_empty_chart(f"No market data for {symbol}")
                 
-                # Get position values
-                symbols = []
-                values = []
+                if bars is None or bars.empty:
+                    return self._create_empty_chart("No data available")
                 
-                for pos in positions:
-                    symbols.append(pos['symbol'])
-                    values.append(abs(float(pos['market_value'])))
+                # Create professional candlestick chart
+                fig = go.Figure()
                 
-                fig = go.Figure(data=[go.Pie(
-                    labels=symbols,
-                    values=values,
-                    hole=0.3
-                )])
+                # Add candlestick
+                fig.add_trace(go.Candlestick(
+                    x=bars.index,
+                    open=bars['open'],
+                    high=bars['high'],
+                    low=bars['low'],
+                    close=bars['close'],
+                    name=symbol,
+                    increasing_line_color='#00ff88',
+                    decreasing_line_color='#ff4444',
+                    increasing_fillcolor='rgba(0, 255, 136, 0.3)',
+                    decreasing_fillcolor='rgba(255, 68, 68, 0.3)'
+                ))
                 
+                # Add volume
+                fig.add_trace(go.Bar(
+                    x=bars.index,
+                    y=bars['volume'],
+                    name='Volume',
+                    yaxis='y2',
+                    marker_color='rgba(0, 170, 255, 0.3)',
+                    showlegend=False
+                ))
+                
+                # Professional chart styling
                 fig.update_layout(
-                    title="Position Allocation",
-                    showlegend=True,
-                    margin=dict(l=20, r=20, t=40, b=20)
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#ffffff', family='JetBrains Mono', size=11),
+                    xaxis=dict(
+                        gridcolor='rgba(255,255,255,0.08)',
+                        showgrid=True,
+                        zeroline=False,
+                        color='#cccccc',
+                        showticklabels=True,
+                        tickfont=dict(size=10)
+                    ),
+                    yaxis=dict(
+                        title=dict(text="Price ($)", font=dict(size=11)),
+                        gridcolor='rgba(255,255,255,0.08)', 
+                        showgrid=True,
+                        zeroline=False,
+                        color='#cccccc',
+                        side='right',
+                        tickfont=dict(size=10),
+                        tickformat=',.2f'
+                    ),
+                    yaxis2=dict(
+                        title=dict(text="Volume", font=dict(size=10)),
+                        overlaying='y',
+                        side='left',
+                        showgrid=False,
+                        color='#888888',
+                        tickfont=dict(size=9),
+                        showticklabels=True
+                    ),
+                    showlegend=False,
+                    margin=dict(l=80, r=80, t=20, b=40),
+                    hovermode='x unified',
+                    hoverlabel=dict(
+                        bgcolor='rgba(42, 42, 42, 0.9)',
+                        bordercolor='rgba(255, 255, 255, 0.2)',
+                        font=dict(color='white', family='JetBrains Mono', size=10)
+                    )
+                )
+                
+                # Add LLM decision annotations (example)
+                fig.add_annotation(
+                    x=bars.index[-10],
+                    y=bars['high'].iloc[-10],
+                    text="🤖 BUY Signal<br>Confidence: 85%",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowcolor='#00ff88',
+                    bgcolor='rgba(0, 255, 136, 0.1)',
+                    bordercolor='#00ff88',
+                    font=dict(color='#00ff88', size=10)
                 )
                 
                 return fig
                 
             except Exception as e:
-                logger.error(f"Error updating allocation chart: {e}")
-                return self._empty_chart(f"Error: {str(e)}")
+                logger.error(f"Error updating main chart: {e}")
+                return self._create_empty_chart("Chart Error")
         
         @self.app.callback(
-            Output("positions-table", "children"),
-            [Input("interval-component", "n_intervals")]
+            Output('llm-thoughts', 'children'),
+            [Input('llm-interval', 'n_intervals')]
         )
-        def update_positions_table(n):
-            """Update positions table"""
+        def update_llm_thoughts(n):
+            """Update LLM thought process display"""
             try:
-                positions = self.alpaca.get_positions()
+                # Get recent LLM conversations
+                conversations = self._get_llm_conversations()
                 
-                if not positions:
-                    return html.P("No open positions", className="text-muted text-center")
-                
-                # Format positions data
-                data = []
-                for pos in positions:
-                    unrealized_pl = float(pos.get('unrealized_pl', 0))
-                    unrealized_plpc = float(pos.get('unrealized_plpc', 0)) * 100
-                    
-                    data.append({
-                        'Symbol': pos['symbol'],
-                        'Qty': int(pos['qty']),
-                        'Avg Entry': f"${float(pos['avg_entry_price']):.2f}",
-                        'Current': f"${float(pos['current_price']):.2f}",
-                        'Market Value': f"${float(pos['market_value']):,.2f}",
-                        'P&L': f"${unrealized_pl:+,.2f}",
-                        'P&L %': f"{unrealized_plpc:+.2f}%",
-                    })
-                
-                return dash_table.DataTable(
-                    data=data,
-                    columns=[{"name": i, "id": i} for i in data[0].keys()],
-                    style_cell={'textAlign': 'left', 'padding': '10px'},
-                    style_header={
-                        'backgroundColor': 'rgb(230, 230, 230)',
-                        'fontWeight': 'bold'
-                    },
-                    style_data_conditional=[
-                        {
-                            'if': {'column_id': 'P&L'},
-                            'color': 'green',
-                            'fontWeight': 'bold'
-                        }
+                if not conversations:
+                    return [
+                        html.Div([
+                            html.Div("💭 Waiting for LLM analysis...", className="llm-thought"),
+                            html.Div([
+                                html.Div("System Ready", style={"fontSize": "11px", "color": "var(--text-muted)"}),
+                                html.Div(className="confidence-bar", children=[
+                                    html.Div(className="confidence-fill", style={
+                                        "width": "100%", 
+                                        "background": "var(--accent-blue)"
+                                    })
+                                ])
+                            ])
+                        ])
                     ]
-                )
+                
+                # Show latest thoughts
+                thoughts = []
+                for conv in conversations[-5:]:  # Last 5 conversations
+                    confidence = 75  # Default confidence
+                    if 'response' in conv:
+                        try:
+                            response_data = json.loads(conv['response'])
+                            confidence = response_data.get('confidence', 75)
+                        except:
+                            pass
+                    
+                    thought_text = f"💭 {conv.get('symbol', 'Market')}: "
+                    if 'prompt' in conv and len(conv['prompt']) > 0:
+                        # Show full prompt text
+                        thought_text += conv['prompt']
+                    else:
+                        thought_text += "Analyzing market conditions..."
+                    
+                    # Add response if available
+                    if 'response' in conv and len(conv['response']) > 0:
+                        thought_text += f"\n\n🤖 Response: {conv['response']}"
+                    
+                    confidence_color = "var(--accent-green)" if confidence >= 70 else "var(--accent-orange)" if confidence >= 50 else "var(--accent-red)"
+                    
+                    thoughts.append(
+                        html.Div([
+                            html.Div(thought_text, className="llm-thought"),
+                            html.Div([
+                                html.Div(f"Confidence: {confidence}%", style={"fontSize": "11px", "color": "var(--text-muted)"}),
+                                html.Div(className="confidence-bar", children=[
+                                    html.Div(className="confidence-fill", style={
+                                        "width": f"{confidence}%", 
+                                        "background": confidence_color
+                                    })
+                                ])
+                            ])
+                        ])
+                    )
+                
+                return thoughts
                 
             except Exception as e:
-                logger.error(f"Error updating positions table: {e}")
-                return html.P(f"Error: {str(e)}", className="text-danger")
+                logger.error(f"Error updating LLM thoughts: {e}")
+                return [html.Div("🔧 LLM system error", className="llm-thought")]
         
         @self.app.callback(
-            [
-                Output("trades-table", "children"),
-                Output("symbol-dropdown", "options"),
-            ],
-            [Input("interval-component", "n_intervals")]
+            Output('market-screener', 'children'),
+            [Input('main-interval', 'n_intervals')]
         )
-        def update_trades_table(n):
-            """Update recent trades table"""
+        def update_market_screener(n):
+            """Update market intelligence screener"""
             try:
-                # Get recent orders
-                orders = self.alpaca.get_orders(status='all', limit=20)
+                # Get market intelligence data
+                intelligence_data = self._get_latest_market_intelligence()
                 
-                if not orders:
-                    return (
-                        html.P("No recent trades", className="text-muted text-center"),
-                        []
-                    )
+                if not intelligence_data:
+                    return [
+                        html.Div([
+                            html.Div("🔍 Scanning markets...", className="metric-label"),
+                            html.Div("--", className="metric-value neutral")
+                        ], className="metric-card")
+                    ]
                 
-                # Format trades data
-                data = []
-                symbols = set()
+                # Create metric cards
+                cards = []
                 
-                for order in orders:
-                    if order.get('status') == 'filled':
-                        filled_at = order.get('filled_at', '')
-                        if filled_at:
-                            filled_at = pd.to_datetime(filled_at).strftime('%Y-%m-%d %H:%M')
-                        
-                        symbols.add(order['symbol'])
-                        
-                        data.append({
-                            'Time': filled_at,
-                            'Symbol': order['symbol'],
-                            'Side': order['side'].upper(),
-                            'Qty': int(order.get('filled_qty', 0)),
-                            'Price': f"${float(order.get('filled_avg_price', 0)):.2f}",
-                            'Status': order['status'].upper()
-                        })
+                # Market sentiment
+                sentiment = intelligence_data.get('market_sentiment', 'neutral')
+                confidence = intelligence_data.get('confidence', 0)
+                sentiment_color = "positive" if sentiment == "bullish" else "negative" if sentiment == "bearish" else "neutral"
                 
-                # Symbol dropdown options
-                symbol_options = [{'label': s, 'value': s} for s in sorted(symbols)]
-                
-                if not data:
-                    return (
-                        html.P("No filled orders", className="text-muted text-center"),
-                        symbol_options
-                    )
-                
-                return (
-                    dash_table.DataTable(
-                        data=data,
-                        columns=[{"name": i, "id": i} for i in data[0].keys()],
-                        style_cell={'textAlign': 'left', 'padding': '10px'},
-                        style_header={
-                            'backgroundColor': 'rgb(230, 230, 230)',
-                            'fontWeight': 'bold'
-                        },
-                        style_data_conditional=[
-                            {
-                                'if': {
-                                    'filter_query': '{Side} = "BUY"',
-                                    'column_id': 'Side'
-                                },
-                                'color': 'green',
-                                'fontWeight': 'bold'
-                            },
-                            {
-                                'if': {
-                                    'filter_query': '{Side} = "SELL"',
-                                    'column_id': 'Side'
-                                },
-                                'color': 'red',
-                                'fontWeight': 'bold'
-                            }
-                        ],
-                        page_size=10
-                    ),
-                    symbol_options
+                cards.append(
+                    html.Div([
+                        html.Div("Market Sentiment", className="metric-label"),
+                        html.Div(f"{sentiment.title()} ({confidence}%)", className=f"metric-value {sentiment_color}")
+                    ], className="metric-card")
                 )
                 
-            except Exception as e:
-                logger.error(f"Error updating trades table: {e}")
-                return (html.P(f"Error: {str(e)}", className="text-danger"), [])
-        
-        @self.app.callback(
-            Output("indicators-chart", "figure"),
-            [Input("symbol-dropdown", "value")]
-        )
-        def update_indicators_chart(symbol):
-            """Update technical indicators chart"""
-            if not symbol:
-                return self._empty_chart("Select a symbol to view indicators")
-            
-            try:
-                # Get historical data
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=90)
-                
-                bars = self.alpaca.get_bars(
-                    symbol=symbol,
-                    start=start_date.strftime("%Y-%m-%d"),
-                    end=end_date.strftime("%Y-%m-%d"),
-                    timeframe="1Day"
+                # Opportunities
+                opportunities = intelligence_data.get('opportunities', [])
+                cards.append(
+                    html.Div([
+                        html.Div("Opportunities", className="metric-label"),
+                        html.Div(str(len(opportunities)), className="metric-value positive")
+                    ], className="metric-card")
                 )
                 
-                if bars.empty:
-                    return self._empty_chart(f"No data available for {symbol}")
+                # Risk Level
+                risks = intelligence_data.get('risks', [])
+                risk_count = len(risks)
+                risk_color = "negative" if risk_count > 3 else "neutral" if risk_count > 1 else "positive"
                 
-                # Calculate indicators
-                df = analyze_dataframe(bars)
-                
-                # Create subplots
-                fig = make_subplots(
-                    rows=3, cols=1,
-                    shared_xaxes=True,
-                    vertical_spacing=0.05,
-                    row_heights=[0.5, 0.25, 0.25],
-                    subplot_titles=(f'{symbol} Price & Indicators', 'RSI', 'MACD')
+                cards.append(
+                    html.Div([
+                        html.Div("Risk Alerts", className="metric-label"),
+                        html.Div(str(risk_count), className=f"metric-value {risk_color}")
+                    ], className="metric-card")
                 )
                 
-                # Price and moving averages
-                fig.add_trace(
-                    go.Candlestick(
-                        x=df.index,
-                        open=df['open'],
-                        high=df['high'],
-                        low=df['low'],
-                        close=df['close'],
-                        name='Price'
-                    ),
-                    row=1, col=1
-                )
-                
-                if 'sma_20' in df.columns:
-                    fig.add_trace(
-                        go.Scatter(x=df.index, y=df['sma_20'], name='SMA 20',
-                                 line=dict(color='orange', width=1)),
-                        row=1, col=1
-                    )
-                
-                if 'sma_50' in df.columns:
-                    fig.add_trace(
-                        go.Scatter(x=df.index, y=df['sma_50'], name='SMA 50',
-                                 line=dict(color='blue', width=1)),
-                        row=1, col=1
-                    )
-                
-                # RSI
-                if 'rsi' in df.columns:
-                    fig.add_trace(
-                        go.Scatter(x=df.index, y=df['rsi'], name='RSI',
-                                 line=dict(color='purple', width=2)),
-                        row=2, col=1
-                    )
-                    # Add RSI reference lines
-                    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-                    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-                
-                # MACD
-                if 'macd' in df.columns and 'macd_signal' in df.columns:
-                    fig.add_trace(
-                        go.Scatter(x=df.index, y=df['macd'], name='MACD',
-                                 line=dict(color='blue', width=1)),
-                        row=3, col=1
-                    )
-                    fig.add_trace(
-                        go.Scatter(x=df.index, y=df['macd_signal'], name='Signal',
-                                 line=dict(color='orange', width=1)),
-                        row=3, col=1
+                # Show top opportunities
+                if opportunities:
+                    cards.append(html.Hr(style={"borderColor": "var(--border-color)", "margin": "16px 0"}))
+                    cards.append(
+                        html.Div("🎯 Top Opportunities", style={"color": "var(--accent-green)", "fontWeight": "bold", "marginBottom": "8px"})
                     )
                     
-                    if 'macd_histogram' in df.columns:
-                        colors = ['green' if val >= 0 else 'red' for val in df['macd_histogram']]
-                        fig.add_trace(
-                            go.Bar(x=df.index, y=df['macd_histogram'], name='Histogram',
-                                 marker_color=colors),
-                            row=3, col=1
+                    for opp in opportunities[:3]:
+                        cards.append(
+                            html.Div([
+                                html.Div(str(opp), 
+                                        style={"fontSize": "11px", "color": "var(--text-secondary)", "padding": "3px 0", "lineHeight": "1.3"})
+                            ])
                         )
                 
-                fig.update_layout(
-                    height=800,
-                    showlegend=True,
-                    hovermode='x unified',
-                    margin=dict(l=40, r=40, t=60, b=40)
-                )
-                
-                fig.update_xaxes(title_text="Date", row=3, col=1)
-                fig.update_yaxes(title_text="Price ($)", row=1, col=1)
-                fig.update_yaxes(title_text="RSI", row=2, col=1)
-                fig.update_yaxes(title_text="MACD", row=3, col=1)
-                
-                return fig
+                return cards
                 
             except Exception as e:
-                logger.error(f"Error updating indicators chart: {e}")
-                return self._empty_chart(f"Error: {str(e)}")
+                logger.error(f"Error updating market screener: {e}")
+                return [html.Div("🔧 Screener error", className="metric-card")]
         
-        # New LLM Intelligence Callbacks
         @self.app.callback(
-            Output("llm-content", "children"),
-            [Input("llm-tabs", "active_tab"), Input("interval-component", "n_intervals")]
+            [Output('performance-metrics', 'children'),
+             Output('positions-panel', 'children'),
+             Output('conversations-panel', 'children')],
+            [Input('main-interval', 'n_intervals')]
         )
-        def update_llm_content(active_tab, n):
-            """Update LLM intelligence content based on active tab"""
-            if active_tab == "market-intel":
-                return self._create_market_intelligence_content()
-            elif active_tab == "llm-conversations":
-                return self._create_llm_conversations_content()
-            elif active_tab == "trading-plan":
-                return self._create_trading_plan_content()
-            return html.Div("Select a tab to view content")
-        
-        # Enhanced Technical Indicators Callbacks
-        @self.app.callback(
-            [
-                Output("rsi-value", "children"),
-                Output("rsi-signal", "children"),
-                Output("macd-value", "children"), 
-                Output("macd-signal", "children"),
-                Output("volume-ratio", "children"),
-                Output("volume-signal", "children"),
-                Output("trend-value", "children"),
-                Output("trend-signal", "children"),
-                Output("volatility-value", "children"),
-                Output("volatility-signal", "children"),
-                Output("ai-confidence", "children"),
-                Output("ai-action", "children"),
-            ],
-            [Input("symbol-dropdown", "value"), Input("interval-component", "n_intervals")]
-        )
-        def update_indicator_cards(symbol, n):
-            """Update individual indicator cards"""
-            if not symbol:
-                empty = ["--", "", "--", "", "--", "", "--", "", "--", "", "--", ""]
-                return empty
-            
+        def update_bottom_panels(n):
+            """Update performance, positions, and conversations panels"""
             try:
-                # Get latest data for the symbol
-                bars = self.alpaca.get_bars(
-                    symbol=symbol,
-                    start=datetime.now() - timedelta(days=30),
-                    end=datetime.now() - timedelta(hours=24),
-                    timeframe='1Day'
-                )
+                # Performance Metrics
+                account = self.alpaca.get_account()
                 
-                if bars.empty:
-                    return ["No data", "", "No data", "", "No data", "", "No data", "", "No data", "", "No data", ""]
+                # Handle both dict and object responses
+                if isinstance(account, dict):
+                    equity = float(account.get('equity', 100000))
+                    last_equity = float(account.get('last_equity', equity))
+                    buying_power = float(account.get('buying_power', 0))
+                else:
+                    equity = float(account.equity)
+                    last_equity = float(account.last_equity)
+                    buying_power = float(account.buying_power)
                 
-                # Calculate indicators
-                from wawatrader.indicators import analyze_dataframe, get_latest_signals
-                df = analyze_dataframe(bars)
-                signals = get_latest_signals(df)
+                pnl = equity - last_equity
                 
-                if not signals:
-                    return ["No signals", "", "No signals", "", "No signals", "", "No signals", "", "No signals", "", "No signals", ""]
-                
-                # Extract values
-                rsi = signals.get('momentum', {}).get('rsi', 0)
-                macd = signals.get('momentum', {}).get('macd', 0)
-                volume_ratio = signals.get('volume', {}).get('volume_ratio', 0)
-                sma_20 = signals.get('trend', {}).get('sma_20', 0)
-                sma_50 = signals.get('trend', {}).get('sma_50', 0)
-                volatility = signals.get('volatility', {}).get('volatility', 0)
-                
-                # Determine signals
-                rsi_signal = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
-                macd_signal = "Bullish" if macd > 0 else "Bearish"
-                volume_signal = "High" if volume_ratio > 1.5 else "Low" if volume_ratio < 0.5 else "Normal"
-                trend_signal = "Bullish" if sma_20 > sma_50 else "Bearish"
-                vol_signal = "High" if volatility > 30 else "Low" if volatility < 15 else "Normal"
-                
-                # Get AI analysis from recent decisions
-                ai_conf, ai_action = self._get_recent_ai_analysis(symbol)
-                
-                return [
-                    f"{rsi:.1f}", rsi_signal,
-                    f"{macd:.3f}", macd_signal,
-                    f"{volume_ratio:.2f}x", volume_signal,
-                    "Bullish" if sma_20 > sma_50 else "Bearish", trend_signal,
-                    f"{volatility:.1f}%", vol_signal,
-                    f"{ai_conf}%", ai_action
+                # Compact performance layout
+                performance = [
+                    html.Div([
+                        html.Div([
+                            html.Div("Portfolio", className="compact-label"),
+                            html.Div(f"${equity:,.0f}", className="compact-value neutral")
+                        ], className="compact-metric"),
+                        html.Div([
+                            html.Div("P&L Today", className="compact-label"),
+                            html.Div(f"${pnl:+,.0f}", className=f"compact-value {'positive' if pnl >= 0 else 'negative'}")
+                        ], className="compact-metric")
+                    ], className="compact-grid"),
+                    
+                    html.Div([
+                        html.Div([
+                            html.Div("Buying Power", className="compact-label"),
+                            html.Div(f"${buying_power:,.0f}", className="compact-value neutral")
+                        ], className="compact-metric"),
+                        html.Div([
+                            html.Div("Cash Avail", className="compact-label"),
+                            html.Div(f"${buying_power*0.25:,.0f}", className="compact-value neutral")  # Rough estimate
+                        ], className="compact-metric")
+                    ], className="compact-grid")
                 ]
                 
-            except Exception as e:
-                logger.error(f"Error updating indicator cards: {e}")
-                return ["Error", "", "Error", "", "Error", "", "Error", "", "Error", "", "Error", ""]
-    
-    def _create_market_intelligence_content(self):
-        """Create market intelligence dashboard content"""
-        try:
-            # Get latest market intelligence from file or database
-            intelligence_data = self._get_latest_market_intelligence()
-            
-            if not intelligence_data:
-                return html.Div([
-                    dbc.Alert("No market intelligence data available yet. The system will generate analysis during the next trading cycle.", color="info")
-                ])
-            
-            return html.Div([
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardBody([
-                                html.H5("📊 Market Sentiment"),
-                                html.H3(intelligence_data.get('market_sentiment', 'Unknown').title(), 
-                                        className=f"text-{'success' if intelligence_data.get('market_sentiment') == 'bullish' else 'danger' if intelligence_data.get('market_sentiment') == 'bearish' else 'warning'}"),
-                                html.P(f"Confidence: {intelligence_data.get('confidence', 0)}%")
-                            ])
-                        ])
-                    ], width=3),
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardBody([
-                                html.H5("🎯 Market Regime"),
-                                html.H3(intelligence_data.get('regime_assessment', 'Unknown').replace('_', ' ').title()),
-                                html.P("Current market state")
-                            ])
-                        ])
-                    ], width=3),
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardBody([
-                                html.H5("⚠️ Risk Level"),
-                                html.H3("Medium", className="text-warning"),  # Calculated from risks
-                                html.P(f"{len(intelligence_data.get('risks', []))} risks identified")
-                            ])
-                        ])
-                    ], width=3),
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardBody([
-                                html.H5("💡 Opportunities"),
-                                html.H3(str(len(intelligence_data.get('opportunities', [])))),
-                                html.P("Potential trades found")
-                            ])
-                        ])
-                    ], width=3),
-                ], className="mb-3"),
-                
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardHeader("🔍 Key Findings"),
-                            dbc.CardBody([
-                                html.Ul([
-                                    html.Li(str(finding)) for finding in intelligence_data.get('key_findings', ['No findings available'])
-                                ])
-                            ])
-                        ])
-                    ], width=6),
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardHeader("📋 Recommended Actions"),
-                            dbc.CardBody([
-                                html.Ol([
-                                    html.Li(str(action)) for action in intelligence_data.get('recommended_actions', ['No recommendations available'])
-                                ])
-                            ])
-                        ])
-                    ], width=6),
-                ])
-            ])
-            
-        except Exception as e:
-            logger.error(f"Error creating market intelligence content: {e}")
-            return dbc.Alert(f"Error loading market intelligence: {str(e)}", color="danger")
-    
-    def _create_llm_conversations_content(self):
-        """Create LLM conversations history content"""
-        try:
-            conversations = self._get_llm_conversations()
-            
-            if not conversations:
-                return dbc.Alert("No LLM conversations recorded yet. Start a trading cycle to see AI interactions.", color="info")
-            
-            conversation_cards = []
-            for i, conv in enumerate(conversations[-10:]):  # Show last 10 conversations
-                timestamp = conv.get('timestamp', 'Unknown')
-                symbol = conv.get('symbol', 'Unknown')
-                prompt = conv.get('prompt', 'No prompt')[:200] + '...' if len(conv.get('prompt', '')) > 200 else conv.get('prompt', '')
-                response = conv.get('response', 'No response')[:200] + '...' if len(conv.get('response', '')) > 200 else conv.get('response', '')
-                
-                conversation_cards.append(
-                    dbc.Card([
-                        dbc.CardHeader([
-                            html.H6(f"🤖 {symbol} Analysis - {timestamp}", className="mb-0"),
-                            dbc.Badge(conv.get('action', 'Unknown'), color="primary", className="ms-2")
-                        ]),
-                        dbc.CardBody([
-                            dbc.Accordion([
-                                dbc.AccordionItem([
-                                    html.Pre(prompt, style={'fontSize': '12px', 'whiteSpace': 'pre-wrap'})
-                                ], title="📤 Prompt to LLM"),
-                                dbc.AccordionItem([
-                                    html.Pre(response, style={'fontSize': '12px', 'whiteSpace': 'pre-wrap'})
-                                ], title="📥 LLM Response"),
-                            ])
-                        ])
-                    ], className="mb-2")
-                )
-            
-            return html.Div(conversation_cards)
-            
-        except Exception as e:
-            logger.error(f"Error creating LLM conversations: {e}")
-            return dbc.Alert(f"Error loading conversations: {str(e)}", color="danger")
-    
-    def _create_trading_plan_content(self):
-        """Create trading plan and strategy content"""
-        return html.Div([
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("🎯 Current Trading Strategy"),
-                        dbc.CardBody([
-                            html.H5("Hybrid LLM + Technical Analysis"),
-                            html.P("WawaTrader combines technical indicators with AI sentiment analysis for trading decisions."),
-                            html.Hr(),
-                            html.H6("📋 Trading Rules:"),
-                            html.Ul([
-                                html.Li("Maximum 10% position size per stock"),
-                                html.Li("Maximum 2% daily loss limit"),
-                                html.Li("Minimum 60% AI confidence required for trades"),
-                                html.Li("Technical analysis validates AI decisions"),
-                                html.Li("Paper trading only (no real money risk)")
-                            ]),
-                            html.Hr(),
-                            html.H6("🔄 Trading Cycle (Every 5 minutes):"),
-                            html.Ol([
-                                html.Li("📊 Fetch real-time market data"),
-                                html.Li("📈 Calculate 21+ technical indicators"),
-                                html.Li("📰 Gather recent news for each symbol"),
-                                html.Li("🤖 LLM analyzes market + news + technicals"),
-                                html.Li("⚖️ Risk management validates decisions"),
-                                html.Li("💰 Execute paper trades (if approved)"),
-                                html.Li("📝 Log all decisions with reasoning"),
-                                html.Li("🔍 Background market intelligence during wait")
-                            ])
-                        ])
-                    ])
-                ], width=6),
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("🎲 Strategy Tags & Status"),
-                        dbc.CardBody([
+                # Positions
+                try:
+                    positions = self.alpaca.get_positions()
+                    position_cards = []
+                    
+                    if positions and len(positions) > 0:
+                        for pos in positions[:5]:  # Top 5 positions
+                            # Handle both dict and object responses
+                            if isinstance(pos, dict):
+                                symbol = pos.get('symbol', 'UNKNOWN')
+                                qty = pos.get('qty', 0)
+                                pnl = float(pos.get('unrealized_pl', 0))
+                            else:
+                                symbol = pos.symbol
+                                qty = pos.qty
+                                pnl = float(pos.unrealized_pl)
+                                
+                            pnl_color = "positive" if pnl >= 0 else "negative"
+                            
+                            position_cards.append(
+                                html.Div([
+                                    html.Div([
+                                        html.Span(symbol, style={"fontWeight": "bold", "fontSize": "12px", "color": "var(--accent-blue)"}),
+                                        html.Span(f" {qty}", style={"fontSize": "10px", "color": "var(--text-muted)", "marginLeft": "6px"})
+                                    ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
+                                    html.Div(f"${pnl:+,.0f}", className=f"compact-value {pnl_color}", style={"fontSize": "11px", "textAlign": "right"})
+                                ], style={"background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "borderRadius": "4px", "padding": "6px 8px", "margin": "3px 0"})
+                            )
+                    else:
+                        position_cards = [
                             html.Div([
-                                dbc.Badge("🤖 AI-Powered", color="primary", className="me-2 mb-2"),
-                                dbc.Badge("📈 Technical Analysis", color="success", className="me-2 mb-2"),
-                                dbc.Badge("📰 News Integration", color="info", className="me-2 mb-2"),
-                                dbc.Badge("⚡ Real-time", color="warning", className="me-2 mb-2"),
-                                dbc.Badge("🛡️ Risk Management", color="danger", className="me-2 mb-2"),
-                                dbc.Badge("📊 Paper Trading", color="secondary", className="me-2 mb-2"),
-                                dbc.Badge("🔄 Automated", color="dark", className="me-2 mb-2"),
-                            ], className="mb-3"),
-                            html.Hr(),
-                            html.H6("📈 Performance Metrics:"),
-                            html.Ul([
-                                html.Li(f"🎯 Win Rate: {self._get_win_rate()}%"),
-                                html.Li(f"📊 Total Trades: {self._get_total_trades()}"),
-                                html.Li(f"💰 Best Trade: +{self._get_best_trade()}%"),
-                                html.Li(f"📉 Worst Trade: {self._get_worst_trade()}%"),
-                                html.Li(f"⏱️ Avg Hold Time: {self._get_avg_hold_time()}"),
-                            ])
-                        ])
-                    ])
-                ], width=6),
-            ])
-        ])
+                                html.Div("No active positions", style={"fontSize": "11px", "color": "var(--text-muted)", "textAlign": "center", "padding": "12px"})
+                            ], style={"background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "borderRadius": "4px"})
+                        ]
+                except Exception as pos_error:
+                    logger.warning(f"Error getting positions: {pos_error}")
+                    position_cards = [
+                        html.Div([
+                            html.Div("Positions unavailable", style={"fontSize": "11px", "color": "var(--accent-red)", "textAlign": "center", "padding": "12px"})
+                        ], style={"background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "borderRadius": "4px"})
+                    ]
+                
+                # Conversations
+                conversations = self._get_llm_conversations()[-3:]  # Last 3 conversations
+                conv_cards = []
+                
+                for conv in conversations:
+                    symbol = conv.get('symbol', 'Unknown')
+                    timestamp = conv.get('timestamp', '')
+                    if timestamp:
+                        try:
+                            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                            time_str = dt.strftime("%H:%M")
+                        except:
+                            time_str = timestamp[:5] if len(timestamp) > 5 else timestamp
+                    else:
+                        time_str = "N/A"
+                    
+                    # Try to extract action from response
+                    action = "ANALYZE"
+                    if 'response' in conv:
+                        try:
+                            response_data = json.loads(conv['response'])
+                            action = response_data.get('action', 'ANALYZE').upper()
+                        except:
+                            pass
+                    
+                    action_color = "positive" if action == "BUY" else "negative" if action == "SELL" else "neutral"
+                    
+                    conv_cards.append(
+                        html.Div([
+                            html.Div([
+                                html.Span(f"{symbol}", style={"fontWeight": "bold", "fontSize": "11px", "color": "var(--accent-blue)"}),
+                                html.Span(f"{time_str}", style={"fontSize": "9px", "color": "var(--text-muted)", "marginLeft": "auto"})
+                            ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
+                            html.Div(action, className=f"compact-value {action_color}", style={"fontSize": "10px", "textAlign": "center", "marginTop": "2px"})
+                        ], style={"background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "borderRadius": "4px", "padding": "6px 8px", "margin": "3px 0"})
+                    )
+                
+                if not conv_cards:
+                    conv_cards = [
+                        html.Div([
+                            html.Div("No AI conversations yet", style={"fontSize": "11px", "color": "var(--text-muted)", "textAlign": "center", "padding": "12px"})
+                        ], style={"background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "borderRadius": "4px"})
+                    ]
+                
+                return performance, position_cards, conv_cards
+                
+            except Exception as e:
+                logger.error(f"Error updating bottom panels: {e}")
+                return (
+                    [html.Div("Error loading performance", className="metric-card")],
+                    [html.Div("Error loading positions", className="metric-card")], 
+                    [html.Div("Error loading conversations", className="metric-card")]
+                )
     
-    def _get_latest_market_intelligence(self):
-        """Get latest market intelligence data"""
-        try:
-            # Try to read from logs or database
-            log_file = Path("logs/decisions.jsonl")
-            if log_file.exists():
-                # This is a placeholder - in a real implementation, you'd parse the intelligence data
-                return {
-                    'market_sentiment': 'neutral',
-                    'confidence': 75,
-                    'regime_assessment': 'bull_market',
-                    'key_findings': ['Market showing steady growth', 'Tech sector leading', 'Volume normalized'],
-                    'opportunities': [{'symbol': 'AAPL', 'reason': 'Bullish breakout'}],
-                    'risks': [{'type': 'sector_concentration', 'description': 'Over-weighted in tech'}],
-                    'recommended_actions': ['Monitor sector rotation', 'Consider diversification']
-                }
-        except:
-            pass
-        return None
+    def _create_empty_chart(self, message: str):
+        """Create empty chart with message"""
+        fig = go.Figure()
+        fig.add_annotation(
+            x=0.5, y=0.5,
+            text=message,
+            xref="paper", yref="paper",
+            showarrow=False,
+            font=dict(size=16, color="#888888")
+        )
+        fig.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(showgrid=False, showticklabels=False),
+            yaxis=dict(showgrid=False, showticklabels=False),
+            margin=dict(l=0, r=0, t=0, b=0)
+        )
+        return fig
     
     def _get_llm_conversations(self):
-        """Get LLM conversation history"""
+        """Get LLM conversations from log file"""
         try:
+            log_file = Path("logs/llm_conversations.jsonl")
             conversations = []
             
-            # Read from the new conversation log
-            conv_log_file = Path("logs/llm_conversations.jsonl")
-            if conv_log_file.exists():
-                with open(conv_log_file, 'r') as f:
-                    for line in f:
-                        try:
-                            data = json.loads(line)
-                            conversations.append({
-                                'timestamp': data.get('timestamp', ''),
-                                'symbol': data.get('symbol', ''),
-                                'prompt': data.get('prompt', ''),
-                                'response': data.get('response', ''),
-                                'action': 'Analysis'  # Default action
-                            })
-                        except:
-                            continue
-            
-            # Also read from decisions log for additional context
-            log_file = Path("logs/decisions.jsonl")
             if log_file.exists():
                 with open(log_file, 'r') as f:
                     for line in f:
                         try:
-                            data = json.loads(line)
-                            if 'llm_analysis' in data:
-                                conversations.append({
-                                    'timestamp': data.get('timestamp', ''),
-                                    'symbol': data.get('symbol', ''),
-                                    'prompt': 'Trading Decision Context',
-                                    'response': data.get('llm_analysis', {}).get('raw_response', ''),
-                                    'action': data.get('action', '').upper()
-                                })
+                            conversations.append(json.loads(line))
                         except:
                             continue
-                            
-            # Sort by timestamp and return recent ones
-            conversations.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-            return conversations[:30]  # Last 30 conversations
+            
+            return conversations[-20:]  # Last 20 conversations
+            
         except Exception as e:
-            logger.error(f"Error getting LLM conversations: {e}")
+            logger.error(f"Error reading conversations: {e}")
             return []
     
-    def _get_recent_ai_analysis(self, symbol):
-        """Get recent AI analysis for symbol"""
+    def _get_latest_market_intelligence(self):
+        """Get latest market intelligence data"""
         try:
-            conversations = self._get_llm_conversations()
-            for conv in reversed(conversations):
-                if conv.get('symbol') == symbol:
-                    # Extract confidence and action from the conversation
-                    return 75, "HOLD"  # Placeholder
-            return 50, "ANALYZE"
-        except:
-            return 50, "UNKNOWN"
-    
-    def _get_win_rate(self):
-        """Calculate win rate from trading history"""
-        return 67  # Placeholder
-    
-    def _get_total_trades(self):
-        """Get total number of trades"""
-        return 23  # Placeholder
-    
-    def _get_best_trade(self):
-        """Get best trade performance"""
-        return 8.5  # Placeholder
-    
-    def _get_worst_trade(self):
-        """Get worst trade performance"""
-        return -3.2  # Placeholder
-    
-    def _get_avg_hold_time(self):
-        """Get average holding time"""
-        return "2.3 hours"  # Placeholder
-    
-    def _empty_chart(self, message: str) -> go.Figure:
-        """Create an empty chart with a message"""
-        fig = go.Figure()
-        fig.add_annotation(
-            text=message,
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color="gray")
-        )
-        fig.update_layout(
-            xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-            yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-            margin=dict(l=40, r=40, t=40, b=40)
-        )
-        return fig
+            # Try to get from database or file
+            # For now, return mock data
+            return {
+                "market_sentiment": "bullish",
+                "confidence": 75,
+                "opportunities": [
+                    "AAPL showing strong momentum",
+                    "Tech sector outperforming",
+                    "Low volatility environment"
+                ],
+                "risks": [
+                    "High market concentration",
+                    "Earnings season approaching"
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Error getting market intelligence: {e}")
+            return None
     
     def run(self, host: str = "127.0.0.1", port: int = 8050, debug: bool = False):
-        """
-        Run the dashboard server.
-        
-        Args:
-            host: Host IP address
-            port: Port number
-            debug: Enable debug mode
-        """
-        logger.info(f"Starting dashboard on http://{host}:{port}")
+        """Run the professional dashboard"""
+        logger.info(f"🚀 Starting WawaTrader Pro Dashboard on http://{host}:{port}")
+        logger.info("🎯 Professional trading interface with LLM transparency")
+        logger.info("📊 Dark theme optimized for daytrading")
+        logger.info("🤖 Real-time AI decision monitoring")
+        logger.info("")
         logger.info("Press Ctrl+C to stop")
         
-        self.app.run(host=host, port=port, debug=debug)
+        # Use the correct method for current Dash version
+        try:
+            self.app.run(host=host, port=port, debug=debug)
+        except AttributeError:
+            # Fallback for older Dash versions
+            self.app.run_server(host=host, port=port, debug=debug)
 
 
-def main():
-    """Main entry point for running dashboard standalone"""
-    dashboard = Dashboard()
-    dashboard.run(debug=True)
-
-
-if __name__ == "__main__":
-    main()
