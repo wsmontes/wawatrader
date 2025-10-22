@@ -38,10 +38,21 @@ from loguru import logger
 import asyncio
 
 try:
-    from dash import Dash, html, dcc, Input, Output, dash_table, callback, ctx
+    from dash import Dash, html, dcc, Input, Output, dash_table, callback, ctx, State, ALL
     import dash_bootstrap_components as dbc
     import plotly.express as px
     DASH_AVAILABLE = True
+    MODAL_AVAILABLE = True
+except ImportError:
+    try:
+        # Try importing just the core components
+        from dash import Dash, html, dcc, Input, Output, callback, ctx, State, ALL
+        import plotly.express as px
+        DASH_AVAILABLE = True
+        MODAL_AVAILABLE = False
+    except ImportError:
+        DASH_AVAILABLE = False
+        MODAL_AVAILABLE = False
 except ImportError:
     logger.warning("Dash not installed. Dashboard features unavailable.")
     logger.info("Install with: pip install dash dash-bootstrap-components plotly")
@@ -330,9 +341,11 @@ class Dashboard:
                         border-radius: 8px;
                         overflow: hidden;
                         min-width: 0;
-                        min-height: 0;
+                        min-height: 400px;  /* Minimum height for chart visibility */
                         grid-column: 2;
                         grid-row: 1;
+                        display: flex;
+                        flex-direction: column;
                     }
                     
                     /* Market Intel */
@@ -416,6 +429,239 @@ class Dashboard:
                     .positive { color: var(--accent-green); }
                     .negative { color: var(--accent-red); }
                     .neutral { color: var(--text-secondary); }
+                    
+                    /* Configuration Modal */
+                    .config-button {
+                        background: var(--bg-tertiary);
+                        border: 1px solid var(--border-color);
+                        border-radius: 6px;
+                        padding: 8px 12px;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        color: var(--text-primary);
+                        font-size: 14px;
+                        margin-left: 12px;
+                    }
+                    
+                    .config-button:hover {
+                        background: var(--accent-blue);
+                        border-color: var(--accent-blue);
+                        color: var(--bg-primary);
+                        transform: translateY(-1px);
+                    }
+                    
+                    .config-button:focus {
+                        outline: 2px solid var(--accent-blue);
+                    }
+                    
+                    .config-modal {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.8);
+                        backdrop-filter: blur(4px);
+                        z-index: 10000;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    }
+                    
+                    .config-content {
+                        background: var(--bg-secondary);
+                        border: 2px solid var(--accent-blue);
+                        border-radius: 12px;
+                        width: 90%;
+                        max-width: 1000px;
+                        height: 80vh;
+                        max-height: 800px;
+                        overflow: hidden;
+                        display: flex;
+                        flex-direction: column;
+                        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+                    }
+                    
+                    .config-header {
+                        background: linear-gradient(135deg, var(--bg-tertiary), var(--accent-blue));
+                        padding: 16px 24px;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        border-bottom: 1px solid var(--glass-border);
+                    }
+                    
+                    .config-title {
+                        color: var(--text-primary);
+                        font-size: 20px;
+                        font-weight: bold;
+                        margin: 0;
+                    }
+                    
+                    .config-close {
+                        background: none;
+                        border: none;
+                        color: var(--text-primary);
+                        font-size: 24px;
+                        cursor: pointer;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        transition: background 0.2s;
+                    }
+                    
+                    .config-close:hover {
+                        background: rgba(255, 255, 255, 0.1);
+                    }
+                    
+                    .config-tabs {
+                        background: var(--bg-tertiary);
+                        display: flex;
+                        border-bottom: 1px solid var(--glass-border);
+                    }
+                    
+                    .config-tab {
+                        padding: 12px 24px;
+                        cursor: pointer;
+                        border-bottom: 3px solid transparent;
+                        color: var(--text-muted);
+                        font-weight: 500;
+                        transition: all 0.2s;
+                        flex: 1;
+                        text-align: center;
+                    }
+                    
+                    .config-tab:hover {
+                        color: var(--text-primary);
+                        background: var(--bg-secondary);
+                    }
+                    
+                    .config-tab.active {
+                        color: var(--accent-blue);
+                        border-bottom-color: var(--accent-blue);
+                        background: var(--bg-secondary);
+                    }
+                    
+                    .config-body {
+                        flex: 1;
+                        overflow-y: auto;
+                        padding: 24px;
+                    }
+                    
+                    .config-section {
+                        margin-bottom: 32px;
+                    }
+                    
+                    .config-section-title {
+                        color: var(--accent-blue);
+                        font-size: 16px;
+                        font-weight: bold;
+                        margin-bottom: 16px;
+                        border-bottom: 1px solid var(--glass-border);
+                        padding-bottom: 8px;
+                    }
+                    
+                    .config-field {
+                        margin-bottom: 20px;
+                    }
+                    
+                    .config-label {
+                        display: block;
+                        color: var(--text-primary);
+                        font-size: 13px;
+                        font-weight: 500;
+                        margin-bottom: 6px;
+                    }
+                    
+                    .config-input, .config-textarea {
+                        width: 100%;
+                        background: var(--bg-primary);
+                        border: 1px solid var(--border-color);
+                        border-radius: 6px;
+                        padding: 10px 12px;
+                        color: var(--text-primary);
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 12px;
+                        line-height: 1.4;
+                        transition: border-color 0.2s;
+                        box-sizing: border-box;
+                    }
+                    
+                    .config-textarea {
+                        resize: vertical;
+                        min-height: 120px;
+                        max-height: 300px;
+                    }
+                    
+                    .config-input:focus, .config-textarea:focus {
+                        outline: none;
+                        border-color: var(--accent-blue);
+                        box-shadow: 0 0 0 2px rgba(0, 170, 255, 0.2);
+                    }
+                    
+                    .config-help {
+                        font-size: 11px;
+                        color: var(--text-muted);
+                        margin-top: 4px;
+                        line-height: 1.3;
+                    }
+                    
+                    .config-save-btn {
+                        background: var(--accent-green);
+                        color: var(--bg-primary);
+                        border: none;
+                        border-radius: 6px;
+                        padding: 10px 20px;
+                        font-weight: bold;
+                        cursor: pointer;
+                        transition: all 0.2s;
+                        margin-right: 12px;
+                    }
+                    
+                    .config-save-btn:hover {
+                        background: var(--accent-blue);
+                        transform: translateY(-1px);
+                    }
+                    
+                    .config-reset-btn {
+                        background: var(--accent-red);
+                        color: var(--text-primary);
+                        border: none;
+                        border-radius: 6px;
+                        padding: 10px 20px;
+                        font-weight: bold;
+                        cursor: pointer;
+                        transition: all 0.2s;
+                    }
+                    
+                    .config-reset-btn:hover {
+                        background: #cc3333;
+                        transform: translateY(-1px);
+                    }
+                    
+                    .config-grid {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 20px;
+                    }
+                    
+                    @media (max-width: 768px) {
+                        .config-content {
+                            width: 95%;
+                            height: 90vh;
+                        }
+                        
+                        .config-grid {
+                            grid-template-columns: 1fr;
+                        }
+                        
+                        .config-tabs {
+                            flex-direction: column;
+                        }
+                        
+                        .config-tab {
+                            text-align: left;
+                        }
+                    }
                     
                     /* Scrollbars */
                     ::-webkit-scrollbar {
@@ -534,6 +780,53 @@ class Dashboard:
                         }
                     }
                 </style>
+                <script>
+                    // Modal and tab management
+                    function openConfigModal() {
+                        document.getElementById('config-modal').style.display = 'flex';
+                        console.log('Config modal opened');
+                    }
+                    
+                    function closeConfigModal() {
+                        document.getElementById('config-modal').style.display = 'none';
+                        console.log('Config modal closed');
+                    }
+                    
+                    function switchTab(activeTab, inactiveTab) {
+                        // Update tab classes
+                        document.getElementById(activeTab).className = 'config-tab active';
+                        document.getElementById(inactiveTab).className = 'config-tab';
+                    }
+                    
+                    // Initialize when DOM is ready
+                    document.addEventListener('DOMContentLoaded', function() {
+                        // Add click handlers
+                        const configBtn = document.getElementById('config-button');
+                        const closeBtn = document.getElementById('config-close');
+                        const llmTab = document.getElementById('llm-tab');
+                        const traderTab = document.getElementById('trader-tab');
+                        
+                        if (configBtn) {
+                            configBtn.addEventListener('click', openConfigModal);
+                        }
+                        
+                        if (closeBtn) {
+                            closeBtn.addEventListener('click', closeConfigModal);
+                        }
+                        
+                        // Close modal when clicking backdrop
+                        const modal = document.getElementById('config-modal');
+                        if (modal) {
+                            modal.addEventListener('click', function(e) {
+                                if (e.target === modal) {
+                                    closeConfigModal();
+                                }
+                            });
+                        }
+                        
+                        console.log('Config modal handlers initialized');
+                    });
+                </script>
             </head>
             <body>
                 {%app_entry%}
@@ -576,6 +869,12 @@ class Dashboard:
                             style={"background": "var(--bg-tertiary)", "color": "var(--text-secondary)"}),
                     html.Div(id="pnl-header", className="status-badge",
                             style={"background": "var(--bg-tertiary)", "fontFamily": "JetBrains Mono"}),
+                    html.Button([
+                        html.I(className="fas fa-cog", style={"marginRight": "6px"}),
+                        "Config"
+                    ], 
+                    id="config-button", 
+                    className="config-button")
                 ], className="header-status")
             ], className="header-bar"),
             
@@ -618,9 +917,15 @@ class Dashboard:
                         config={
                             'displayModeBar': True,
                             'displaylogo': False,
-                            'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d']
+                            'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+                            'responsive': True  # Enable responsive sizing
                         },
-                        style={"height": "calc(100% - 50px)"}
+                        style={
+                            "height": "calc(100% - 50px)", 
+                            "width": "100%",
+                            "minHeight": "350px",  # Ensure minimum chart height
+                            "flex": "1"  # Take up available space
+                        }
                     )
                 ], className="chart-panel"),
                 
@@ -667,7 +972,52 @@ class Dashboard:
             ], className="main-grid"),
             
             # Alert Panel (Fixed position)
-            html.Div(id="alert-panel", className="alert-panel")
+            html.Div(id="alert-panel", className="alert-panel"),
+            
+            # Configuration Modal - Using DBC Modal for better compatibility
+            dbc.Modal([
+                dbc.ModalHeader([
+                    dbc.ModalTitle("⚙️ WawaTrader Configuration")
+                ]),
+                dbc.ModalBody([
+                    # Tabs
+                    dbc.Tabs([
+                        dbc.Tab(label="🤖 LLM Settings", tab_id="llm-tab", active_tab_style={"backgroundColor": "#00aaff"}),
+                        dbc.Tab(label="📈 Trader Settings", tab_id="trader-tab")
+                    ], id="config-tabs", active_tab="llm-tab"),
+                    
+                    html.Br(),
+                    
+                    # Content
+                    html.Div(id="config-content")
+                ])
+            ], id="config-modal", is_open=False, size="xl", backdrop=True) if MODAL_AVAILABLE else 
+            
+            # Fallback simple modal for systems without DBC
+            html.Div(id="config-modal", className="config-modal", style={"display": "none"}, children=[
+                html.Div(className="config-content", children=[
+                    # Header
+                    html.Div(className="config-header", children=[
+                        html.H2("⚙️ WawaTrader Configuration", className="config-title"),
+                        html.Button("×", 
+                                  id="config-close", 
+                                  className="config-close")
+                    ]),
+                    
+                    # Tabs
+                    html.Div(className="config-tabs", children=[
+                        html.Button("🤖 LLM Settings", 
+                                  id="llm-tab", 
+                                  className="config-tab active"),
+                        html.Button("📈 Trader Settings", 
+                                  id="trader-tab", 
+                                  className="config-tab")
+                    ]),
+                    
+                    # Content
+                    html.Div(id="config-content", className="config-body", children=[])
+                ])
+            ])
             
         ], className="professional-container")
     
@@ -730,17 +1080,20 @@ class Dashboard:
                 # Try to get recent data, fall back to daily data if subscription doesn't allow
                 bars = None
                 try:
-                    bars = self.alpaca.get_bars(symbol, limit=100, timeframe='1Hour')  # Use hourly instead of 5min
+                    bars = self.alpaca.get_bars(symbol, limit=100, timeframe='1Day')  # Start with daily for reliability
+                    logger.debug(f"Retrieved {len(bars) if not bars.empty else 0} daily bars for {symbol}")
                     if bars.empty:
-                        raise ValueError("Empty hourly data")
+                        raise ValueError("Empty daily data")
                 except Exception as api_error:
-                    logger.warning(f"Hourly data not available: {api_error}, trying daily data")
+                    logger.error(f"Daily data not available: {api_error}")
                     try:
-                        bars = self.alpaca.get_bars(symbol, limit=50, timeframe='1Day')
+                        # Fallback to a smaller dataset
+                        bars = self.alpaca.get_bars(symbol, limit=30, timeframe='1Day')
+                        logger.debug(f"Fallback: Retrieved {len(bars) if not bars.empty else 0} bars")
                         if bars.empty:
-                            raise ValueError("Empty daily data")
-                    except Exception as daily_error:
-                        logger.error(f"No data available: {daily_error}")
+                            raise ValueError("Empty fallback data")
+                    except Exception as fallback_error:
+                        logger.error(f"No data available: {fallback_error}")
                         return self._create_empty_chart(f"No market data for {symbol}")
                 
                 if bars is None or bars.empty:
@@ -773,7 +1126,7 @@ class Dashboard:
                     showlegend=False
                 ))
                 
-                # Professional chart styling
+                # Professional chart styling with improved responsive layout
                 fig.update_layout(
                     plot_bgcolor='rgba(0,0,0,0)',
                     paper_bgcolor='rgba(0,0,0,0)',
@@ -784,7 +1137,8 @@ class Dashboard:
                         zeroline=False,
                         color='#cccccc',
                         showticklabels=True,
-                        tickfont=dict(size=10)
+                        tickfont=dict(size=10),
+                        fixedrange=False  # Allow zooming
                     ),
                     yaxis=dict(
                         title=dict(text="Price ($)", font=dict(size=11)),
@@ -794,7 +1148,8 @@ class Dashboard:
                         color='#cccccc',
                         side='right',
                         tickfont=dict(size=10),
-                        tickformat=',.2f'
+                        tickformat=',.2f',
+                        fixedrange=False  # Allow zooming
                     ),
                     yaxis2=dict(
                         title=dict(text="Volume", font=dict(size=10)),
@@ -803,16 +1158,20 @@ class Dashboard:
                         showgrid=False,
                         color='#888888',
                         tickfont=dict(size=9),
-                        showticklabels=True
+                        showticklabels=True,
+                        fixedrange=False
                     ),
                     showlegend=False,
-                    margin=dict(l=80, r=80, t=20, b=40),
+                    margin=dict(l=60, r=60, t=10, b=30),  # Reduced margins for better space usage
                     hovermode='x unified',
                     hoverlabel=dict(
                         bgcolor='rgba(42, 42, 42, 0.9)',
                         bordercolor='rgba(255, 255, 255, 0.2)',
                         font=dict(color='white', family='JetBrains Mono', size=10)
-                    )
+                    ),
+                    autosize=True,  # Enable automatic sizing
+                    height=None,    # Let container control height
+                    dragmode='pan'  # Set default drag mode
                 )
                 
                 # Add LLM decision annotations (example)
@@ -1164,6 +1523,357 @@ class Dashboard:
             logger.error(f"Error reading conversations: {e}")
             return []
     
+        # Modal open/close callback
+        @self.app.callback(
+            Output('config-modal', 'is_open') if MODAL_AVAILABLE else Output('config-modal', 'style'),
+            [Input('config-button', 'n_clicks')],
+            [State('config-modal', 'is_open')] if MODAL_AVAILABLE else [],
+            prevent_initial_call=True
+        )
+        def toggle_modal(n_clicks, is_open=None):
+            """Toggle configuration modal"""
+            if n_clicks:
+                logger.info(f"🔧 Config button clicked, toggling modal")
+                if MODAL_AVAILABLE:
+                    return not (is_open if is_open is not None else False)
+                else:
+                    # For non-DBC modal, we'll just open it
+                    return {"display": "flex"}
+            if MODAL_AVAILABLE:
+                return False
+            else:
+                return {"display": "none"}
+
+        # Tab content callback
+        @self.app.callback(
+            Output('config-content', 'children'),
+            [Input('config-tabs', 'active_tab')] if MODAL_AVAILABLE else [Input('llm-tab', 'n_clicks'), Input('trader-tab', 'n_clicks')],
+            prevent_initial_call=False
+        )
+        def render_tab_content(active_tab_or_llm_clicks, trader_clicks=None):
+            """Render content based on active tab"""
+            if MODAL_AVAILABLE:
+                if active_tab_or_llm_clicks == "trader-tab":
+                    return self._get_trader_config_content()
+                else:
+                    return self._get_llm_config_content()
+            else:
+                # Fallback for non-DBC modal
+                ctx_triggered = ctx.triggered[0]['prop_id'] if ctx.triggered else None
+                if ctx_triggered == 'trader-tab.n_clicks' and trader_clicks:
+                    return self._get_trader_config_content()
+                else:
+                    return self._get_llm_config_content()
+        
+        # Save configuration callback
+        @self.app.callback(
+            Output('config-modal', 'style', allow_duplicate=True),
+            [Input({'type': 'config-save', 'index': ALL}, 'n_clicks')],
+            [State({'type': 'config-input', 'index': ALL}, 'value'),
+             State({'type': 'config-input', 'index': ALL}, 'id')],
+            prevent_initial_call=True
+        )
+        def save_configuration(save_clicks, values, input_ids):
+            """Save configuration changes"""
+            if not any(save_clicks):
+                return {"display": "flex"}
+            
+            try:
+                # Save the configuration
+                config_data = {}
+                for i, input_id in enumerate(input_ids):
+                    if i < len(values) and values[i] is not None:
+                        config_data[input_id['index']] = values[i]
+                
+                self._save_config(config_data)
+                logger.info("✅ Configuration saved successfully")
+                
+                # Close modal after save
+                return {"display": "none"}
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to save configuration: {e}")
+                return {"display": "flex"}
+
+    def _get_llm_config_content(self):
+        """Get LLM configuration tab content"""
+        current_config = self._load_config()
+        
+        return html.Div([
+            html.Div(className="config-section", children=[
+                html.H3("🤖 LLM Analysis Settings", className="config-section-title"),
+                
+                html.Div(className="config-field", children=[
+                    html.Label("Market Analysis Prompt Template", className="config-label"),
+                    dcc.Textarea(
+                        id={'type': 'config-input', 'index': 'llm_market_prompt'},
+                        value=current_config.get('llm_market_prompt', self._get_default_market_prompt()),
+                        className="config-textarea",
+                        placeholder="Enter the prompt template for market analysis..."
+                    ),
+                    html.Div("This prompt is sent to the LLM with market data for analysis. Use {symbol}, {price}, {indicators} placeholders.", className="config-help")
+                ]),
+                
+                html.Div(className="config-field", children=[
+                    html.Label("Decision Making Prompt", className="config-label"),
+                    dcc.Textarea(
+                        id={'type': 'config-input', 'index': 'llm_decision_prompt'},
+                        value=current_config.get('llm_decision_prompt', self._get_default_decision_prompt()),
+                        className="config-textarea",
+                        placeholder="Enter the prompt for trading decisions..."
+                    ),
+                    html.Div("This prompt asks the LLM to make buy/sell/hold decisions. Must request JSON output with action, confidence, reasoning.", className="config-help")
+                ])
+            ]),
+            
+            html.Div(className="config-section", children=[
+                html.H3("⚙️ LLM Connection Settings", className="config-section-title"),
+                
+                html.Div(className="config-grid", children=[
+                    html.Div(className="config-field", children=[
+                        html.Label("LM Studio URL", className="config-label"),
+                        dcc.Input(
+                            id={'type': 'config-input', 'index': 'llm_url'},
+                            value=current_config.get('llm_url', 'http://localhost:1234'),
+                            className="config-input",
+                            placeholder="http://localhost:1234"
+                        ),
+                        html.Div("LM Studio server endpoint", className="config-help")
+                    ]),
+                    
+                    html.Div(className="config-field", children=[
+                        html.Label("Model Name", className="config-label"),
+                        dcc.Input(
+                            id={'type': 'config-input', 'index': 'llm_model'},
+                            value=current_config.get('llm_model', 'gemma-2-2b-it'),
+                            className="config-input",
+                            placeholder="gemma-2-2b-it"
+                        ),
+                        html.Div("Model identifier in LM Studio", className="config-help")
+                    ])
+                ]),
+                
+                html.Div(className="config-grid", children=[
+                    html.Div(className="config-field", children=[
+                        html.Label("Temperature", className="config-label"),
+                        dcc.Input(
+                            id={'type': 'config-input', 'index': 'llm_temperature'},
+                            type="number",
+                            value=current_config.get('llm_temperature', 0.3),
+                            min=0, max=2, step=0.1,
+                            className="config-input"
+                        ),
+                        html.Div("Creativity level (0.0-2.0)", className="config-help")
+                    ]),
+                    
+                    html.Div(className="config-field", children=[
+                        html.Label("Max Tokens", className="config-label"),
+                        dcc.Input(
+                            id={'type': 'config-input', 'index': 'llm_max_tokens'},
+                            type="number",
+                            value=current_config.get('llm_max_tokens', 500),
+                            min=50, max=2000,
+                            className="config-input"
+                        ),
+                        html.Div("Maximum response length", className="config-help")
+                    ])
+                ])
+            ]),
+            
+            html.Div([
+                html.Button("💾 Save LLM Settings", id={'type': 'config-save', 'index': 'llm'}, className="config-save-btn"),
+                html.Button("🔄 Reset to Defaults", id={'type': 'config-reset', 'index': 'llm'}, className="config-reset-btn")
+            ], style={"marginTop": "32px", "textAlign": "center"})
+        ])
+
+    def _get_trader_config_content(self):
+        """Get Trader configuration tab content"""
+        current_config = self._load_config()
+        
+        return html.Div([
+            html.Div(className="config-section", children=[
+                html.H3("📈 Trading Parameters", className="config-section-title"),
+                
+                html.Div(className="config-grid", children=[
+                    html.Div(className="config-field", children=[
+                        html.Label("Max Position Size (%)", className="config-label"),
+                        dcc.Input(
+                            id={'type': 'config-input', 'index': 'max_position_size'},
+                            type="number",
+                            value=current_config.get('max_position_size', 10),
+                            min=1, max=50, step=1,
+                            className="config-input"
+                        ),
+                        html.Div("Maximum % of portfolio per stock", className="config-help")
+                    ]),
+                    
+                    html.Div(className="config-field", children=[
+                        html.Label("Daily Loss Limit (%)", className="config-label"),
+                        dcc.Input(
+                            id={'type': 'config-input', 'index': 'daily_loss_limit'},
+                            type="number",
+                            value=current_config.get('daily_loss_limit', 2),
+                            min=0.5, max=10, step=0.1,
+                            className="config-input"
+                        ),
+                        html.Div("Stop trading if daily loss exceeds this %", className="config-help")
+                    ])
+                ]),
+                
+                html.Div(className="config-grid", children=[
+                    html.Div(className="config-field", children=[
+                        html.Label("Min Confidence (%)", className="config-label"),
+                        dcc.Input(
+                            id={'type': 'config-input', 'index': 'min_confidence'},
+                            type="number",
+                            value=current_config.get('min_confidence', 60),
+                            min=30, max=90, step=5,
+                            className="config-input"
+                        ),
+                        html.Div("Minimum LLM confidence to execute trades", className="config-help")
+                    ]),
+                    
+                    html.Div(className="config-field", children=[
+                        html.Label("Trading Interval (minutes)", className="config-label"),
+                        dcc.Input(
+                            id={'type': 'config-input', 'index': 'trading_interval'},
+                            type="number",
+                            value=current_config.get('trading_interval', 5),
+                            min=1, max=60, step=1,
+                            className="config-input"
+                        ),
+                        html.Div("Minutes between trading cycles", className="config-help")
+                    ])
+                ])
+            ]),
+            
+            html.Div(className="config-section", children=[
+                html.H3("🎯 Trading Symbols", className="config-section-title"),
+                
+                html.Div(className="config-field", children=[
+                    html.Label("Active Symbols", className="config-label"),
+                    dcc.Input(
+                        id={'type': 'config-input', 'index': 'trading_symbols'},
+                        value=current_config.get('trading_symbols', 'AAPL,MSFT,GOOGL,TSLA,NVDA'),
+                        className="config-input",
+                        placeholder="AAPL,MSFT,GOOGL,TSLA,NVDA"
+                    ),
+                    html.Div("Comma-separated list of stock symbols to trade", className="config-help")
+                ])
+            ]),
+            
+            html.Div(className="config-section", children=[
+                html.H3("⚠️ Risk Management", className="config-section-title"),
+                
+                html.Div(className="config-grid", children=[
+                    html.Div(className="config-field", children=[
+                        html.Label("Max Trades Per Day", className="config-label"),
+                        dcc.Input(
+                            id={'type': 'config-input', 'index': 'max_trades_per_day'},
+                            type="number",
+                            value=current_config.get('max_trades_per_day', 20),
+                            min=1, max=100,
+                            className="config-input"
+                        ),
+                        html.Div("Limit total trades per trading day", className="config-help")
+                    ]),
+                    
+                    html.Div(className="config-field", children=[
+                        html.Label("Dry Run Mode", className="config-label"),
+                        dcc.Dropdown(
+                            id={'type': 'config-input', 'index': 'dry_run_mode'},
+                            options=[
+                                {'label': 'Yes - Simulate only', 'value': True},
+                                {'label': 'No - Live paper trading', 'value': False}
+                            ],
+                            value=current_config.get('dry_run_mode', False),
+                            className="config-input",
+                            style={'background': 'var(--bg-primary)', 'color': 'var(--text-primary)'}
+                        ),
+                        html.Div("Enable to simulate without placing real orders", className="config-help")
+                    ])
+                ])
+            ]),
+            
+            html.Div([
+                html.Button("💾 Save Trading Settings", id={'type': 'config-save', 'index': 'trader'}, className="config-save-btn"),
+                html.Button("🔄 Reset to Defaults", id={'type': 'config-reset', 'index': 'trader'}, className="config-reset-btn")
+            ], style={"marginTop": "32px", "textAlign": "center"})
+        ])
+
+    def _load_config(self):
+        """Load current configuration"""
+        try:
+            config_file = self.data_dir / "config.json"
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load config: {e}")
+        
+        return {}
+
+    def _save_config(self, config_data):
+        """Save configuration to file"""
+        try:
+            config_file = self.data_dir / "config.json"
+            
+            # Load existing config
+            existing_config = self._load_config()
+            
+            # Update with new data
+            existing_config.update(config_data)
+            
+            # Save to file
+            with open(config_file, 'w') as f:
+                json.dump(existing_config, f, indent=2)
+                
+            logger.info(f"Configuration saved to {config_file}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save config: {e}")
+            raise
+
+    def _get_default_market_prompt(self):
+        """Get default market analysis prompt"""
+        return """Analyze the following market data for {symbol}:
+
+Current Price: ${price:.2f}
+Technical Indicators:
+{indicators}
+
+Recent Market Context:
+- RSI indicates momentum conditions
+- MACD shows trend strength  
+- Moving averages reveal trend direction
+- Volume patterns suggest institutional interest
+
+Provide a comprehensive analysis considering:
+1. Technical indicator signals
+2. Market momentum and trend
+3. Risk/reward potential
+4. Current market regime
+
+Focus on actionable insights for day trading decisions."""
+
+    def _get_default_decision_prompt(self):
+        """Get default decision-making prompt"""
+        return """Based on the market analysis, make a trading decision and respond with JSON only:
+
+{{
+  "sentiment": "bullish" | "bearish" | "neutral",
+  "confidence": 0-100,
+  "action": "buy" | "sell" | "hold",
+  "reasoning": "Brief explanation of decision rationale"
+}}
+
+Guidelines:
+- Only recommend BUY if highly confident in upward movement
+- Only recommend SELL if holding position and confident in downward movement  
+- Use HOLD when uncertain or conditions don't favor strong moves
+- Confidence should reflect conviction level (60+ for action, <60 for hold)
+- Keep reasoning concise but specific to current market conditions"""
+
     def _get_latest_market_intelligence(self):
         """Get latest market intelligence data"""
         try:
@@ -1195,11 +1905,7 @@ class Dashboard:
         logger.info("")
         logger.info("Press Ctrl+C to stop")
         
-        # Use the correct method for current Dash version
-        try:
-            self.app.run(host=host, port=port, debug=debug)
-        except AttributeError:
-            # Fallback for older Dash versions
-            self.app.run_server(host=host, port=port, debug=debug)
+        # Use modern Dash API (v2.0+) - run_server is obsolete in Dash 3.x
+        self.app.run(host=host, port=port, debug=debug)
 
 

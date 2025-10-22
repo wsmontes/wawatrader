@@ -23,7 +23,11 @@ from .alpaca_client import AlpacaClient, get_client
 # from .risk_manager import RiskManager
 # from .trading_agent import TradingAgent
 
+# Market intelligence
+from .enhanced_intelligence import get_enhanced_intelligence_engine
+
 __all__ = [
     'AlpacaClient',
     'get_client',
+    'get_enhanced_intelligence_engine',
 ]

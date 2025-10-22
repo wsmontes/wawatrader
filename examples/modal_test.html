@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Modal Test</title>
+    <style>
+        .config-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(4px);
+            z-index: 10000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .config-content {
+            background: #2a2a2a;
+            border: 2px solid #00aaff;
+            border-radius: 12px;
+            width: 500px;
+            height: 300px;
+            padding: 20px;
+            color: white;
+        }
+        
+        .config-button {
+            background: #2a2a2a;
+            border: 1px solid #333;
+            color: white;
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+        
+        .config-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            float: right;
+        }
+    </style>
+</head>
+<body style="background: #0a0a0a; color: white; font-family: Arial;">
+    
+    <h1>WawaTrader Dashboard Test</h1>
+    
+    <button id="config-button" class="config-button">⚙️ Config</button>
+    
+    <!-- Modal -->
+    <div id="config-modal" class="config-modal">
+        <div class="config-content">
+            <button id="config-close" class="config-close">&times;</button>
+            <h2>Configuration Modal</h2>
+            <p>This modal should open when you click the Config button.</p>
+            <p>Click the × or outside to close.</p>
+        </div>
+    </div>
+    
+    <script>
+        function openConfigModal() {
+            document.getElementById('config-modal').style.display = 'flex';
+            console.log('Config modal opened');
+        }
+        
+        function closeConfigModal() {
+            document.getElementById('config-modal').style.display = 'none';
+            console.log('Config modal closed');
+        }
+        
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            const configBtn = document.getElementById('config-button');
+            const closeBtn = document.getElementById('config-close');
+            const modal = document.getElementById('config-modal');
+            
+            if (configBtn) {
+                configBtn.addEventListener('click', openConfigModal);
+            }
+            
+            if (closeBtn) {
+                closeBtn.addEventListener('click', closeConfigModal);
+            }
+            
+            // Close modal when clicking backdrop
+            if (modal) {
+                modal.addEventListener('click', function(e) {
+                    if (e.target === modal) {
+                        closeConfigModal();
+                    }
+                });
+            }
+            
+            console.log('Modal handlers initialized');
+        });
+    </script>
+</body>
+</html>
