@@ -14,6 +14,7 @@ This is the "brain" of WawaTrader.
 
 import json
 import time
+import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
@@ -24,6 +25,7 @@ from wawatrader.alpaca_client import get_client
 from wawatrader.indicators import analyze_dataframe, get_latest_signals
 from wawatrader.llm_bridge import LLMBridge
 from wawatrader.risk_manager import get_risk_manager
+from wawatrader.market_intelligence import get_intelligence_engine
 from config.settings import settings
 
 
@@ -78,6 +80,7 @@ class TradingAgent:
         self.alpaca = get_client()
         self.llm_bridge = LLMBridge()
         self.risk_manager = get_risk_manager()
+        self.intelligence_engine = get_intelligence_engine()
         
         # State tracking
         self.decisions: List[TradingDecision] = []
@@ -508,9 +511,33 @@ class TradingAgent:
         logger.info(f"Cycle complete - Processed {len(self.symbols)} symbols")
         logger.info("="*60)
     
+    async def run_background_intelligence(self):
+        """
+        Run background market intelligence analysis during idle time.
+        
+        Returns:
+            MarketIntelligence object or None if failed
+        """
+        try:
+            # Run intelligence analysis
+            intelligence = await self.intelligence_engine.run_background_analysis()
+            
+            # Save intelligence for historical tracking
+            if intelligence:
+                self.intelligence_engine.save_intelligence(intelligence)
+                
+                # Store in memory for next trading cycle
+                self._last_market_intelligence = intelligence
+            
+            return intelligence
+            
+        except Exception as e:
+            logger.error(f"❌ Background intelligence failed: {e}")
+            return None
+    
     def run_continuous(self, interval_minutes: int = 5):
         """
-        Run trading agent continuously.
+        Run trading agent continuously with background market intelligence.
         
         Args:
             interval_minutes: Minutes between cycles
@@ -519,12 +546,47 @@ class TradingAgent:
         
         try:
             while True:
-                # Run cycle
+                # Run trading cycle
                 self.run_cycle()
                 
-                # Wait for next cycle
-                logger.info(f"Waiting {interval_minutes} minutes until next cycle...")
-                time.sleep(interval_minutes * 60)
+                # Run background market intelligence during wait time
+                logger.info(f"🔍 Running background market analysis during {interval_minutes}-minute wait...")
+                
+                start_wait = time.time()
+                # Run async background intelligence from sync context
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    intelligence = loop.run_until_complete(self.run_background_intelligence())
+                    loop.close()
+                except Exception as e:
+                    logger.error(f"Failed to run background intelligence: {e}")
+                    intelligence = None
+                
+                # Log intelligence findings
+                if intelligence:
+                    logger.info(f"📊 Market Intelligence Summary:")
+                    logger.info(f"   Sentiment: {intelligence.market_sentiment} ({intelligence.confidence}%)")
+                    logger.info(f"   Regime: {intelligence.regime_assessment}")
+                    if intelligence.key_findings:
+                        # Handle both strings and other types
+                        findings = [str(f) for f in intelligence.key_findings[:3]]
+                        logger.info(f"   Key Findings: {', '.join(findings)}")
+                    if intelligence.recommended_actions:
+                        # Handle both strings and other types
+                        actions = [str(a) for a in intelligence.recommended_actions[:2]]
+                        logger.info(f"   Recommended Actions: {', '.join(actions)}")
+                
+                # Calculate remaining wait time
+                elapsed = time.time() - start_wait
+                remaining_wait = (interval_minutes * 60) - elapsed
+                
+                if remaining_wait > 0:
+                    logger.info(f"⏱️ Analysis completed in {elapsed:.1f}s, waiting {remaining_wait:.1f}s more...")
+                    time.sleep(remaining_wait)
+                else:
+                    logger.info(f"✅ Analysis took {elapsed:.1f}s (full interval used)")
                 
         except KeyboardInterrupt:
             logger.info("Trading agent stopped by user")

@@ -42,6 +42,10 @@ class LLMBridge:
         self.temperature = settings.lm_studio.temperature
         self.max_tokens = settings.lm_studio.max_tokens
         
+        # Initialize conversation logging
+        self.conversation_log = settings.project_root / "logs" / "llm_conversations.jsonl"
+        self.conversation_log.parent.mkdir(exist_ok=True)
+        
         logger.info(f"LLM Bridge initialized (model: {self.model})")
     
     def indicators_to_text(self, signals: Dict[str, Any]) -> str:
@@ -194,7 +198,7 @@ class LLMBridge:
         
         return "\n".join(prompt_parts)
     
-    def query_llm(self, prompt: str) -> Optional[str]:
+    def query_llm(self, prompt: str, symbol: str = None) -> Optional[str]:
         """
         Send prompt to LLM and get response.
         
@@ -227,6 +231,10 @@ class LLMBridge:
             if response.choices and len(response.choices) > 0:
                 content = response.choices[0].message.content
                 logger.debug(f"LLM response: {content[:100]}...")
+                
+                # Log the conversation
+                self._log_conversation(prompt, content, symbol)
+                
                 return content
             else:
                 logger.error("LLM returned empty response")
@@ -235,6 +243,34 @@ class LLMBridge:
         except Exception as e:
             logger.error(f"LLM query failed: {e}")
             return None
+    
+    def _log_conversation(self, prompt: str, response: str, symbol: str = None):
+        """
+        Log LLM conversation for dashboard display and debugging.
+        
+        Args:
+            prompt: The input prompt sent to LLM
+            response: The response received from LLM
+            symbol: Optional symbol being analyzed
+        """
+        try:
+            import json
+            from datetime import datetime
+            
+            conversation_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'symbol': symbol or 'unknown',
+                'prompt': prompt,
+                'response': response,
+                'prompt_length': len(prompt),
+                'response_length': len(response)
+            }
+            
+            with open(self.conversation_log, 'a') as f:
+                f.write(json.dumps(conversation_entry) + '\n')
+                
+        except Exception as e:
+            logger.error(f"Failed to log LLM conversation: {e}")
     
     def parse_llm_response(self, response: str) -> Optional[Dict[str, Any]]:
         """
@@ -354,7 +390,7 @@ class LLMBridge:
         )
         
         # Step 3: Query LLM
-        response = self.query_llm(prompt)
+        response = self.query_llm(prompt, symbol)
         if not response:
             return None
         
