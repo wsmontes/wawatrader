@@ -1,0 +1,6 @@
+config
+docs
+examples
+scripts
+tests
+wawatrader

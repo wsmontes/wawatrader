@@ -1,0 +1,2 @@
+[console_scripts]
+wawatrader = wawatrader.cli:main

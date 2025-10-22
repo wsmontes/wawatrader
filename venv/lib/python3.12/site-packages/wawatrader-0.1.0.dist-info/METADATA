@@ -1,0 +1,286 @@
+Metadata-Version: 2.4
+Name: wawatrader
+Version: 0.1.0
+Summary: LLM-Powered Algorithmic Trading System
+Home-page: https://github.com/wagnermontes/WawaTrader
+Author: Wagner Montes
+Author-email: wmontes@gmail.com
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Financial and Insurance Industry
+Classifier: Topic :: Office/Business :: Financial :: Investment
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: alpaca-trade-api>=3.0.0
+Requires-Dist: alpaca-py>=0.9.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: scipy>=1.10.0
+Requires-Dist: openai>=1.0.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: matplotlib>=3.7.0
+Requires-Dist: seaborn>=0.12.0
+Requires-Dist: plotly>=5.14.0
+Requires-Dist: requests>=2.31.0
+Requires-Dist: aiohttp>=3.8.0
+Requires-Dist: python-dateutil>=2.8.0
+Requires-Dist: pytz>=2023.3
+Requires-Dist: loguru>=0.7.0
+Requires-Dist: pytest>=7.4.0
+Requires-Dist: pytest-asyncio>=0.21.0
+Requires-Dist: pytest-cov>=4.1.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: flake8>=6.0.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# 🤖 WawaTrader
+
+**LLM-Powered Algorithmic Trading System**
+
+A hybrid trading system combining technical analysis (NumPy/Pandas) with LLM sentiment analysis (Gemma 3) for paper trading on Alpaca Markets.
+
+⚠️ **WARNING: This is experimental software for PAPER TRADING ONLY. Never use with real money without extensive testing.**
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│  Gemma 3 4B (via LM Studio)                     │
+│  • News sentiment analysis                      │
+│  • Trade explanation generation                 │
+│  • Qualitative market interpretation            │
+└───────────────────┬─────────────────────────────┘
+                    │ Text ↔ Numbers Translation
+┌───────────────────▼─────────────────────────────┐
+│  Orchestration Layer (Python)                   │
+│  • LLM Bridge (text formatting/parsing)         │
+│  • Signal Combination (70% tech, 30% LLM)       │
+│  • Validation & Risk Management                 │
+└───────────────────┬─────────────────────────────┘
+                    │ Numerical Operations
+┌───────────────────▼─────────────────────────────┐
+│  NumPy/Pandas Engine                            │
+│  • Technical indicators (RSI, MACD, etc.)       │
+│  • Statistical analysis                         │
+│  • Performance metrics                          │
+└───────────────────┬─────────────────────────────┘
+                    │ Market Data & Execution
+┌───────────────────▼─────────────────────────────┐
+│  Alpaca Markets (Paper Trading)                 │
+│  • Free market data                             │
+│  • Simulated order execution                    │
+│  • Real-time account tracking                   │
+└─────────────────────────────────────────────────┘
+```
+
+## ✨ Features
+
+- **Hybrid Intelligence**: 70% technical indicators + 30% LLM sentiment
+- **Safe Experimentation**: Paper trading only (no real money at risk)
+- **Full Transparency**: Every trade decision is explained by the LLM
+- **Risk Management**: Hard-coded position limits and stop-losses
+- **Performance Optimized**: Runs efficiently on Mac M4 hardware
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+1. **Python 3.10+**
+2. **LM Studio** with Gemma 3 4B model loaded
+3. **Alpaca Markets** paper trading account (free)
+
+### Installation
+
+```bash
+# Clone repository
+cd /Users/wagnermontes/Documents/GitHub/_TESTS/WawaTrader
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On macOS/Linux
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Install in development mode
+pip install -e .
+```
+
+### Configuration
+
+```bash
+# Copy environment template
+cp .env.example .env
+
+# Edit .env and add your Alpaca API keys
+nano .env
+```
+
+Required configuration in `.env`:
+- `ALPACA_API_KEY`: Your Alpaca paper trading API key
+- `ALPACA_SECRET_KEY`: Your Alpaca paper trading secret key
+- `LM_STUDIO_BASE_URL`: LM Studio endpoint (default: http://localhost:1234/v1)
+- `LM_STUDIO_MODEL`: Model name (default: google/gemma-3-4b)
+
+### Setup LM Studio
+
+1. Download and install [LM Studio](https://lmstudio.ai/)
+2. Load the Gemma 3 4B model
+3. Start the local server on port 1234
+4. Verify it's running: `curl http://localhost:1234/v1/models`
+
+### Setup Alpaca Account
+
+1. Sign up at [Alpaca Markets](https://alpaca.markets/)
+2. Navigate to paper trading dashboard
+3. Generate API keys
+4. Copy keys to `.env` file
+
+## 📊 Usage
+
+### Test Configuration
+
+```bash
+python config/settings.py
+```
+
+### Run Trading Agent (Coming Soon)
+
+```bash
+# Start paper trading
+wawatrader start --symbol AAPL
+
+# Run backtest
+wawatrader backtest --symbol AAPL --start 2024-01-01 --end 2024-12-31
+
+# View account status
+wawatrader status
+```
+
+## 🎯 System Design Principles
+
+1. **LLM Never Decides Alone**: All decisions validated by numerical rules
+2. **Fast Path for Numbers**: Technical indicators run in <1ms (NumPy/Pandas)
+3. **Slow Path for Context**: LLM interpretation ~50-200ms (only when needed)
+4. **Fail-Safe Defaults**: System continues if LLM fails
+5. **Audit Everything**: All decisions logged with explanations
+
+## ⚠️ Risk Management
+
+Built-in safety limits:
+- **Max Position Size**: 10% of portfolio per position
+- **Daily Loss Limit**: 2% maximum portfolio loss per day
+- **Portfolio Risk**: 30% maximum total exposure
+- **Confidence Threshold**: 60% minimum to execute trades
+
+## 🧪 Testing Strategy
+
+Before live paper trading:
+1. ✅ Unit tests for technical indicators
+2. ✅ Integration tests with Alpaca API
+3. ✅ LLM translation validation
+4. ✅ Backtesting on historical data
+5. ⏳ 3-6 months paper trading validation
+
+## 📈 Performance Targets
+
+Success metrics for paper trading:
+- **Sharpe Ratio** > 1.0 (risk-adjusted returns)
+- **Win Rate** > 50%
+- **Max Drawdown** < 15%
+- **LLM Sentiment Accuracy** > 55%
+- **System Uptime** > 99%
+
+## 🛠️ Development Roadmap
+
+- [x] Project setup and configuration
+- [ ] Alpaca API integration
+- [ ] Technical indicators module
+- [ ] LLM translation bridge
+- [ ] Risk management system
+- [ ] Trading agent core logic
+- [ ] Market data pipeline
+- [ ] Backtesting framework
+- [ ] Order execution system
+- [ ] LLM explanation engine
+- [ ] Performance analytics
+- [ ] CLI interface
+- [ ] Testing suite
+- [ ] Documentation
+
+## 📝 Project Structure
+
+```
+WawaTrader/
+├── config/              # Configuration management
+│   ├── __init__.py
+│   └── settings.py      # Settings loader
+├── wawatrader/          # Main package
+│   ├── __init__.py
+│   ├── indicators.py    # Technical indicators (NumPy/Pandas)
+│   ├── llm_bridge.py    # LLM orchestration layer
+│   ├── risk_manager.py  # Risk management rules
+│   ├── trading_agent.py # Main trading logic
+│   ├── data_pipeline.py # Market data fetching
+│   ├── order_manager.py # Trade execution
+│   └── analytics.py     # Performance tracking
+├── tests/               # Test suite
+├── logs/                # Trading logs
+├── data/                # Market data cache
+├── .env                 # Environment variables (not in git)
+├── .env.example         # Template for .env
+├── requirements.txt     # Python dependencies
+└── README.md           # This file
+```
+
+## 🤝 Contributing
+
+This is a personal learning project. Contributions welcome but please understand this is experimental software.
+
+## ⚖️ License
+
+MIT License - See LICENSE file for details
+
+## ⚠️ Disclaimer
+
+**THIS SOFTWARE IS FOR EDUCATIONAL AND RESEARCH PURPOSES ONLY.**
+
+- Not financial advice
+- No warranty or guarantees
+- Past performance ≠ future results
+- You are responsible for your own trading decisions
+- Author assumes no liability for financial losses
+
+**ONLY use with paper trading accounts. NEVER with real money until:**
+- Extensive backtesting completed
+- 3-6 months successful paper trading
+- Full understanding of risks
+- Proper risk management in place
+
+## 📧 Contact
+
+Wagner Montes - wmontes@gmail.com
+
+---
+
+**Remember: The market can remain irrational longer than you can remain solvent.**
