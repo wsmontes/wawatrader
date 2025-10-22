@@ -140,11 +140,17 @@ class TradingAgent:
             DataFrame with OHLCV data, or None if error
         """
         try:
-            # For paper trading, use historical data (15-day delay minimum)
-            end_date = datetime.now() - timedelta(days=2)
+            # For basic subscription, use data that's definitely outside real-time restrictions
+            end_date = datetime.now() - timedelta(days=1)  # Yesterday's data (should always be available)
             start_date = end_date - timedelta(days=self.lookback_days)
             
-            bars = self.alpaca.get_bars(symbol, start_date, end_date)
+            bars = self.alpaca.get_bars(
+                symbol=symbol,
+                timeframe='1Day',
+                start=start_date,
+                end=end_date,
+                limit=self.lookback_days
+            )
             
             if bars is None or len(bars) == 0:
                 logger.warning(f"No market data for {symbol}")
@@ -425,16 +431,28 @@ class TradingAgent:
     
     def log_decision(self, decision: TradingDecision):
         """
-        Log decision to file (JSONL format).
+        Log trading decision to both file and memory
         
         Args:
             decision: TradingDecision to log
         """
-        # Log to structured file
-        logger.bind(DECISION=True).info(json.dumps(asdict(decision)))
+        # Convert to dict and handle numpy types
+        decision_dict = asdict(decision)
         
-        # Add to memory
-        self.decisions.append(decision)
+        # Convert numpy types to Python types for JSON serialization
+        def convert_numpy_types(obj):
+            if hasattr(obj, 'item'):  # numpy scalar
+                return obj.item()
+            elif isinstance(obj, dict):
+                return {k: convert_numpy_types(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numpy_types(item) for item in obj]
+            return obj
+        
+        decision_dict = convert_numpy_types(decision_dict)
+        
+        # Log to structured file
+        logger.bind(DECISION=True).info(json.dumps(decision_dict))
     
     def run_cycle(self):
         """

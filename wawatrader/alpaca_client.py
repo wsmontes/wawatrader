@@ -148,6 +148,51 @@ class AlpacaClient:
             # No position exists
             return None
     
+    def get_portfolio_history(self, period: str = "1M", timeframe: str = "1D") -> Optional[Dict[str, Any]]:
+        """
+        Get portfolio history for charting
+        
+        Args:
+            period: Time period (1D, 7D, 1M, 3M, 1Y, 5Y, max)
+            timeframe: Data resolution (1Min, 5Min, 15Min, 1H, 1D)
+            
+        Returns:
+            Dictionary with timestamp and equity arrays
+        """
+        try:
+            # Use Alpaca's portfolio history endpoint
+            history = self.api.get_portfolio_history(
+                period=period,
+                timeframe=timeframe
+            )
+            
+            if history and hasattr(history, 'timestamp') and hasattr(history, 'equity'):
+                return {
+                    'timestamp': history.timestamp,
+                    'equity': history.equity
+                }
+            else:
+                # Fallback to account value if no history
+                account = self.get_account()
+                current_time = pd.Timestamp.now().timestamp()
+                return {
+                    'timestamp': [current_time],
+                    'equity': [account['portfolio_value']]
+                }
+                
+        except APIError as e:
+            logger.error(f"Failed to get portfolio history: {e}")
+            # Return current account value as fallback
+            try:
+                account = self.get_account()
+                current_time = pd.Timestamp.now().timestamp()
+                return {
+                    'timestamp': [current_time],
+                    'equity': [account['portfolio_value']]
+                }
+            except:
+                return None
+    
     # =====================================================
     # Market Data - Historical Bars
     # =====================================================

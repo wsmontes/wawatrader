@@ -656,7 +656,7 @@ class Dashboard:
         logger.info(f"Starting dashboard on http://{host}:{port}")
         logger.info("Press Ctrl+C to stop")
         
-        self.app.run_server(host=host, port=port, debug=debug)
+        self.app.run(host=host, port=port, debug=debug)
 
 
 def main():
