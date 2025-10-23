@@ -15,7 +15,10 @@ sys.path.insert(0, str(project_root))
 
 from wawatrader.market_intelligence import get_intelligence_engine
 from loguru import logger
+import pytest
 
+
+@pytest.mark.asyncio
 async def test_market_intelligence():
     """Test market intelligence engine functionality"""
     

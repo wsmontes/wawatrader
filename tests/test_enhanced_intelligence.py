@@ -17,8 +17,10 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from wawatrader.enhanced_intelligence import get_enhanced_intelligence_engine
+import pytest
 
 
+@pytest.mark.asyncio
 async def test_enhanced_intelligence():
     """Test the enhanced market intelligence system"""
     logger.info("🧪 Testing Enhanced Market Intelligence Engine")

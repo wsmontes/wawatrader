@@ -211,11 +211,11 @@ class Dashboard:
                         50% { opacity: 0.7; }
                     }
                     
-                    /* Main Grid Layout - Optimized for laptop screens */
+                    /* Main Grid Layout - 2 Column: LLM Left, Chart/Performance/Positions Right */
                     .main-grid {
                         display: grid;
-                        grid-template-columns: minmax(300px, 24%) 1fr minmax(260px, 19%);
-                        grid-template-rows: minmax(380px, 60%) minmax(200px, 40%);
+                        grid-template-columns: minmax(320px, 30%) 1fr;
+                        grid-template-rows: minmax(400px, 55%) minmax(200px, 45%);
                         gap: 12px;
                         padding: 12px;
                         height: calc(100vh - 90px);
@@ -225,8 +225,8 @@ class Dashboard:
                     
                     @media (max-width: 1400px) {
                         .main-grid {
-                            grid-template-columns: minmax(280px, 25%) 1fr minmax(240px, 21%);
-                            grid-template-rows: minmax(340px, 62%) minmax(180px, 38%);
+                            grid-template-columns: minmax(300px, 32%) 1fr;
+                            grid-template-rows: minmax(360px, 56%) minmax(180px, 44%);
                             gap: 10px;
                             padding: 10px;
                         }
@@ -234,7 +234,7 @@ class Dashboard:
                     
                     @media (max-width: 1200px) {
                         .main-grid {
-                            grid-template-columns: 1fr 1fr;
+                            grid-template-columns: 1fr;
                             grid-template-rows: minmax(300px, 40%) minmax(200px, 30%) minmax(200px, 30%);
                             height: auto;
                         }
@@ -250,7 +250,7 @@ class Dashboard:
                         }
                     }
                     
-                    /* LLM Mind Panel */
+                    /* LLM Mind Panel - Full left side */
                     .llm-mind {
                         grid-column: 1;
                         grid-row: 1 / -1;
@@ -301,16 +301,57 @@ class Dashboard:
                         top: 0;
                         background: var(--glass-bg);
                         padding-bottom: 8px;
-                        margin-bottom: 12px;
+                        margin-bottom: 8px;
                         border-bottom: 1px solid var(--glass-border);
                         z-index: 10;
                     }
                     
+                    /* Custom Dash Tabs Styling */
+                    .custom-tabs-container {
+                        margin-bottom: 12px;
+                    }
+                    
+                    .custom-tabs {
+                        height: auto !important;
+                        border-bottom: 2px solid var(--border-color) !important;
+                    }
+                    
+                    .custom-tab {
+                        background: var(--bg-secondary) !important;
+                        border: 1px solid var(--border-color) !important;
+                        border-bottom: 2px solid var(--border-color) !important;
+                        color: var(--text-muted) !important;
+                        padding: 10px 20px !important;
+                        font-size: 12px !important;
+                        font-weight: 500 !important;
+                        transition: all 0.2s ease !important;
+                        border-radius: 6px 6px 0 0 !important;
+                        margin-right: 4px !important;
+                        min-height: auto !important;
+                    }
+                    
+                    .custom-tab:hover {
+                        background: var(--bg-tertiary) !important;
+                        color: var(--text-primary) !important;
+                        border-bottom-color: var(--accent-blue) !important;
+                    }
+                    
+                    .custom-tab--selected {
+                        background: var(--bg-primary) !important;
+                        color: var(--accent-blue) !important;
+                        border-color: var(--accent-blue) !important;
+                        border-bottom: 2px solid var(--accent-blue) !important;
+                        font-weight: 600 !important;
+                        position: relative;
+                        bottom: -2px;
+                    }
+                    
                     .llm-thoughts-container {
-                        height: calc(100% - 60px);
+                        height: calc(100% - 110px);
                         overflow-y: auto;
                         overflow-x: hidden;
                         padding-right: 8px;
+                        padding-top: 8px;
                         scrollbar-width: thin;
                         scrollbar-color: var(--accent-blue) var(--bg-secondary);
                     }
@@ -334,7 +375,7 @@ class Dashboard:
                         background: var(--accent-green);
                     }
                     
-                    /* Chart Panel */
+                    /* Chart Panel - Top right */
                     .chart-panel {
                         background: var(--glass-bg);
                         border: 1px solid var(--glass-border);
@@ -348,7 +389,7 @@ class Dashboard:
                         flex-direction: column;
                     }
                     
-                    /* Market Intel */
+                    /* Market Intel - No longer used in new layout */
                     .market-intel {
                         background: var(--glass-bg);
                         border: 1px solid var(--glass-border);
@@ -356,9 +397,7 @@ class Dashboard:
                         padding: 20px;
                         overflow-y: auto;
                         min-height: 0;
-                        grid-column: 3;
-                        grid-row: 1 / -1;
-                        max-height: calc(100vh - 130px);
+                        display: none; /* Hidden in new layout */
                     }
                     
                     /* Metric Cards - Optimized for laptop screens */
@@ -880,7 +919,7 @@ class Dashboard:
             
             # Main Grid Layout
             html.Div([
-                # LLM Mind Panel (Left)
+                # LLM Mind Panel (Left - Full height with tabs)
                 html.Div([
                     html.Div([
                         html.I(className="fas fa-brain", style={"marginRight": "8px", "color": "var(--accent-blue)"}),
@@ -888,23 +927,33 @@ class Dashboard:
                         html.Div("🧠", style={"marginLeft": "auto", "fontSize": "16px"})
                     ], className="llm-mind-header", style={"display": "flex", "alignItems": "center"}),
                     
-                    html.Div(id="llm-thoughts", className="llm-thoughts-container", children=[
-                        html.Div([
-                            html.Div("💭 Analyzing market conditions...", className="llm-thought"),
-                            html.Div([
-                                html.Div("Confidence", style={"fontSize": "10px", "color": "var(--text-muted)", "marginBottom": "4px"}),
-                                html.Div(className="confidence-bar", children=[
-                                    html.Div(className="confidence-fill", style={
-                                        "width": "75%", 
-                                        "background": "linear-gradient(90deg, var(--accent-green), var(--accent-blue))"
-                                    })
-                                ])
-                            ], style={"marginTop": "8px"})
-                        ])
-                    ])
+                    # Tabs for Raw Data vs Formatted
+                    dcc.Tabs(
+                        id="llm-tabs", 
+                        value='formatted',
+                        className='custom-tabs',
+                        parent_className='custom-tabs-container',
+                        children=[
+                            dcc.Tab(
+                                label='📊 Raw Data', 
+                                value='raw',
+                                className='custom-tab',
+                                selected_className='custom-tab--selected'
+                            ),
+                            dcc.Tab(
+                                label='💬 Formatted', 
+                                value='formatted',
+                                className='custom-tab',
+                                selected_className='custom-tab--selected'
+                            )
+                        ]
+                    ),
+                    
+                    # Tab content
+                    html.Div(id="llm-tab-content", className="llm-thoughts-container")
                 ], className="llm-mind"),
                 
-                # Chart Panel (Center)
+                # Chart Panel (Top Right)
                 html.Div([
                     html.Div([
                         html.I(className="fas fa-chart-candlestick", style={"marginRight": "8px", "color": "var(--accent-blue)"}),
@@ -929,45 +978,34 @@ class Dashboard:
                     )
                 ], className="chart-panel"),
                 
-                # Market Intel Panel (Right)
+                # Bottom Right Container - Performance and Positions side by side
                 html.Div([
+                    # Performance Panel (Bottom Left of right side)
                     html.Div([
-                        html.I(className="fas fa-chart-line", style={"marginRight": "8px", "color": "var(--accent-green)"}),
-                        html.H5("Market Intel", style={"margin": "0", "color": "var(--accent-green)"})
-                    ], style={"display": "flex", "alignItems": "center", "marginBottom": "16px"}),
+                        html.Div([
+                            html.I(className="fas fa-chart-area", style={"marginRight": "8px", "color": "var(--accent-orange)"}),
+                            html.H5("Performance", style={"margin": "0", "color": "var(--accent-orange)", "fontSize": "14px"})
+                        ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
+                        
+                        html.Div(id="performance-metrics", style={"overflowY": "auto", "height": "calc(100% - 40px)"})
+                    ], className="glass-card", style={"padding": "18px", "minHeight": "0", "flex": "1"}),
                     
-                    html.Div(id="market-screener")
-                ], className="market-intel"),
-                
-                # Performance Panel (Bottom Left)
-                html.Div([
+                    # Positions Panel (Bottom Right of right side)  
                     html.Div([
-                        html.I(className="fas fa-chart-area", style={"marginRight": "8px", "color": "var(--accent-orange)"}),
-                        html.H5("Performance", style={"margin": "0", "color": "var(--accent-orange)", "fontSize": "14px"})
-                    ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
-                    
-                    html.Div(id="performance-metrics", style={"overflowY": "auto", "height": "calc(100% - 40px)"})
-                ], className="glass-card", style={"gridColumn": "1", "gridRow": "2", "padding": "18px", "minHeight": "0"}),
-                
-                # Positions Panel (Bottom Center)  
-                html.Div([
-                    html.Div([
-                        html.I(className="fas fa-briefcase", style={"marginRight": "8px", "color": "var(--accent-purple)"}),
-                        html.H5("Positions", style={"margin": "0", "color": "var(--accent-purple)", "fontSize": "14px"})
-                    ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
-                    
-                    html.Div(id="positions-panel", style={"overflowY": "auto", "height": "calc(100% - 40px)"})
-                ], className="glass-card", style={"gridColumn": "2", "gridRow": "2", "padding": "18px", "minHeight": "0"}),
-                
-                # Conversations Panel (Bottom Right)
-                html.Div([
-                    html.Div([
-                        html.I(className="fas fa-robot", style={"marginRight": "8px", "color": "var(--accent-red)"}),
-                        html.H5("AI Decisions", style={"margin": "0", "color": "var(--accent-red)", "fontSize": "14px"})
-                    ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
-                    
-                    html.Div(id="conversations-panel", style={"overflowY": "auto", "height": "calc(100% - 40px)"})
-                ], className="glass-card", style={"gridColumn": "3", "gridRow": "2", "padding": "18px", "minHeight": "0"}),
+                        html.Div([
+                            html.I(className="fas fa-briefcase", style={"marginRight": "8px", "color": "var(--accent-purple)"}),
+                            html.H5("Positions", style={"margin": "0", "color": "var(--accent-purple)", "fontSize": "14px"})
+                        ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"}),
+                        
+                        html.Div(id="positions-panel", style={"overflowY": "auto", "height": "calc(100% - 40px)"})
+                    ], className="glass-card", style={"padding": "18px", "minHeight": "0", "flex": "1"}),
+                ], style={
+                    "gridColumn": "2", 
+                    "gridRow": "2", 
+                    "display": "flex", 
+                    "gap": "12px",
+                    "minHeight": "0"
+                }),
                 
             ], className="main-grid"),
             
@@ -1194,11 +1232,12 @@ class Dashboard:
                 return self._create_empty_chart("Chart Error")
         
         @self.app.callback(
-            Output('llm-thoughts', 'children'),
-            [Input('llm-interval', 'n_intervals')]
+            Output('llm-tab-content', 'children'),
+            [Input('llm-interval', 'n_intervals'),
+             Input('llm-tabs', 'value')]
         )
-        def update_llm_thoughts(n):
-            """Update LLM thought process display"""
+        def update_llm_tab_content(n, tab):
+            """Update LLM tab content based on selected tab"""
             try:
                 # Get recent LLM conversations
                 conversations = self._get_llm_conversations()
@@ -1219,121 +1258,202 @@ class Dashboard:
                         ])
                     ]
                 
-                # Show latest thoughts
-                thoughts = []
-                for conv in conversations[-5:]:  # Last 5 conversations
-                    confidence = 75  # Default confidence
-                    if 'response' in conv:
-                        try:
-                            response_data = json.loads(conv['response'])
-                            confidence = response_data.get('confidence', 75)
-                        except:
-                            pass
-                    
-                    thought_text = f"💭 {conv.get('symbol', 'Market')}: "
-                    if 'prompt' in conv and len(conv['prompt']) > 0:
-                        # Show full prompt text
-                        thought_text += conv['prompt']
-                    else:
-                        thought_text += "Analyzing market conditions..."
-                    
-                    # Add response if available
-                    if 'response' in conv and len(conv['response']) > 0:
-                        thought_text += f"\n\n🤖 Response: {conv['response']}"
-                    
-                    confidence_color = "var(--accent-green)" if confidence >= 70 else "var(--accent-orange)" if confidence >= 50 else "var(--accent-red)"
-                    
-                    thoughts.append(
-                        html.Div([
-                            html.Div(thought_text, className="llm-thought"),
+                if tab == 'raw':
+                    # Show raw data with JSON
+                    thoughts = []
+                    for conv in conversations[-5:]:  # Last 5 conversations
+                        confidence = 75  # Default confidence
+                        if 'response' in conv:
+                            try:
+                                response_data = json.loads(conv['response'])
+                                confidence = response_data.get('confidence', 75)
+                            except:
+                                pass
+                        
+                        thought_text = f"💭 {conv.get('symbol', 'Market')}: "
+                        if 'prompt' in conv and len(conv['prompt']) > 0:
+                            thought_text += conv['prompt']
+                        else:
+                            thought_text += "Analyzing market conditions..."
+                        
+                        # Add response if available
+                        if 'response' in conv and len(conv['response']) > 0:
+                            thought_text += f"\n\n🤖 Response: {conv['response']}"
+                        
+                        confidence_color = "var(--accent-green)" if confidence >= 70 else "var(--accent-orange)" if confidence >= 50 else "var(--accent-red)"
+                        
+                        thoughts.append(
                             html.Div([
-                                html.Div(f"Confidence: {confidence}%", style={"fontSize": "11px", "color": "var(--text-muted)"}),
-                                html.Div(className="confidence-bar", children=[
-                                    html.Div(className="confidence-fill", style={
-                                        "width": f"{confidence}%", 
-                                        "background": confidence_color
-                                    })
+                                html.Div(thought_text, className="llm-thought"),
+                                html.Div([
+                                    html.Div(f"Confidence: {confidence}%", style={"fontSize": "11px", "color": "var(--text-muted)"}),
+                                    html.Div(className="confidence-bar", children=[
+                                        html.Div(className="confidence-fill", style={
+                                            "width": f"{confidence}%", 
+                                            "background": confidence_color
+                                        })
+                                    ])
                                 ])
                             ])
-                        ])
-                    )
+                        )
+                    
+                    return thoughts
                 
-                return thoughts
-                
-            except Exception as e:
-                logger.error(f"Error updating LLM thoughts: {e}")
-                return [html.Div("🔧 LLM system error", className="llm-thought")]
-        
-        @self.app.callback(
-            Output('market-screener', 'children'),
-            [Input('main-interval', 'n_intervals')]
-        )
-        def update_market_screener(n):
-            """Update market intelligence screener"""
-            try:
-                # Get market intelligence data
-                intelligence_data = self._get_latest_market_intelligence()
-                
-                if not intelligence_data:
-                    return [
-                        html.Div([
-                            html.Div("🔍 Scanning markets...", className="metric-label"),
-                            html.Div("--", className="metric-value neutral")
-                        ], className="metric-card")
+                elif tab == 'formatted':
+                    # Show formatted conversation view
+                    conversation_items = []
+                    
+                    for conv in conversations[-5:]:  # Last 5 conversations
+                        # Parse timestamp to readable format
+                        timestamp_raw = conv.get('timestamp', '')
+                        try:
+                            if timestamp_raw:
+                                dt = datetime.fromisoformat(timestamp_raw.replace('Z', '+00:00'))
+                                timestamp = dt.strftime("%I:%M:%S %p")  # 12-hour format with AM/PM
+                            else:
+                                timestamp = datetime.now().strftime("%I:%M:%S %p")
+                        except:
+                            timestamp = timestamp_raw[:8] if len(timestamp_raw) > 8 else "N/A"
+                        
+                        symbol = conv.get('symbol', 'Market')
+                        
+                        # Parse response for sentiment/decision
+                        decision = "Analyzing..."
+                        confidence = 75
+                        if 'response' in conv:
+                            try:
+                                response_data = json.loads(conv['response'])
+                                decision = response_data.get('decision', 'hold').upper()
+                                confidence = response_data.get('confidence', 75)
+                            except:
+                                pass
+                        
+                        # Color based on decision
+                        decision_color = "#00ff88" if decision == "BUY" else "#ff4444" if decision == "SELL" else "#00aaff"
+                        
+                        # Extract key insights from prompt
+                        prompt_summary = ""
+                        if 'prompt' in conv:
+                            prompt = conv['prompt']
+                            # Extract key market data if present
+                            if "RSI" in prompt or "price" in prompt or "trend" in prompt:
+                                prompt_summary = "Analyzing technical indicators and price action."
+                            else:
+                                # Take first 100 chars as summary
+                                prompt_summary = prompt[:100] + "..." if len(prompt) > 100 else prompt
+                        
+                        conversation_items.append(
+                            html.Div([
+                                # Timestamp header - cleaner format
+                                html.Div([
+                                    html.Span("🕐 ", style={"marginRight": "6px", "fontSize": "12px"}),
+                                    html.Span(timestamp, style={
+                                        "fontSize": "11px",
+                                        "color": "var(--text-muted)",
+                                        "fontFamily": "JetBrains Mono",
+                                        "fontWeight": "500"
+                                    })
+                                ], style={
+                                    "marginBottom": "10px",
+                                    "paddingBottom": "6px",
+                                    "borderBottom": "1px solid rgba(255, 255, 255, 0.05)"
+                                }),
+                                
+                                # Question (User)
+                                html.Div([
+                                    html.Div("👤 Trader", style={
+                                        "fontSize": "12px",
+                                        "fontWeight": "600",
+                                        "color": "#00aaff",
+                                        "marginBottom": "6px"
+                                    }),
+                                    html.Div(f"What's the trading decision for {symbol}?", style={
+                                        "fontSize": "12px",
+                                        "color": "var(--text-secondary)",
+                                        "marginLeft": "24px",
+                                        "marginBottom": "6px",
+                                        "fontStyle": "italic",
+                                        "lineHeight": "1.4"
+                                    }),
+                                    html.Div(prompt_summary, style={
+                                        "fontSize": "11px",
+                                        "color": "var(--text-muted)",
+                                        "marginLeft": "24px",
+                                        "lineHeight": "1.5"
+                                    }) if prompt_summary else None
+                                ], style={
+                                    "background": "rgba(0, 170, 255, 0.08)",
+                                    "borderLeft": "3px solid #00aaff",
+                                    "padding": "12px 14px",
+                                    "borderRadius": "0 8px 8px 0",
+                                    "marginBottom": "12px"
+                                }),
+                                
+                                # Answer (AI)
+                                html.Div([
+                                    html.Div("🤖 AI Assistant", style={
+                                        "fontSize": "12px",
+                                        "fontWeight": "600",
+                                        "color": decision_color,
+                                        "marginBottom": "6px"
+                                    }),
+                                    html.Div([
+                                        html.Span("Decision: ", style={
+                                            "color": "var(--text-muted)",
+                                            "fontSize": "12px"
+                                        }),
+                                        html.Span(decision, style={
+                                            "fontWeight": "700",
+                                            "color": decision_color,
+                                            "fontSize": "13px",
+                                            "letterSpacing": "0.5px"
+                                        })
+                                    ], style={
+                                        "marginLeft": "24px",
+                                        "marginBottom": "8px"
+                                    }),
+                                    html.Div([
+                                        html.Span("Confidence: ", style={
+                                            "color": "var(--text-muted)",
+                                            "fontSize": "12px"
+                                        }),
+                                        html.Span(f"{confidence}%", style={
+                                            "fontWeight": "700",
+                                            "color": "#00ff88" if confidence >= 70 else "#ffaa00",
+                                            "fontSize": "13px"
+                                        })
+                                    ], style={
+                                        "marginLeft": "24px"
+                                    })
+                                ], style={
+                                    "background": f"rgba({int(decision_color[1:3], 16)}, {int(decision_color[3:5], 16)}, {int(decision_color[5:7], 16)}, 0.1)",
+                                    "borderLeft": f"3px solid {decision_color}",
+                                    "padding": "12px 14px",
+                                    "borderRadius": "0 8px 8px 0"
+                                })
+                                
+                            ], style={
+                                "marginBottom": "24px",
+                                "paddingBottom": "16px",
+                                "borderBottom": "1px solid rgba(255, 255, 255, 0.08)"
+                            })
+                        )
+                    
+                    return conversation_items if conversation_items else [
+                        html.Div("💬 No conversations yet", style={
+                            "textAlign": "center",
+                            "color": "var(--text-muted)",
+                            "padding": "40px 20px"
+                        })
                     ]
                 
-                # Create metric cards
-                cards = []
-                
-                # Market sentiment
-                sentiment = intelligence_data.get('market_sentiment', 'neutral')
-                confidence = intelligence_data.get('confidence', 0)
-                sentiment_color = "positive" if sentiment == "bullish" else "negative" if sentiment == "bearish" else "neutral"
-                
-                cards.append(
-                    html.Div([
-                        html.Div("Market Sentiment", className="metric-label"),
-                        html.Div(f"{sentiment.title()} ({confidence}%)", className=f"metric-value {sentiment_color}")
-                    ], className="metric-card")
-                )
-                
-                # Opportunities
-                opportunities = intelligence_data.get('opportunities', [])
-                cards.append(
-                    html.Div([
-                        html.Div("Opportunities", className="metric-label"),
-                        html.Div(str(len(opportunities)), className="metric-value positive")
-                    ], className="metric-card")
-                )
-                
-                # Risk Level
-                risks = intelligence_data.get('risks', [])
-                risk_count = len(risks)
-                risk_color = "negative" if risk_count > 3 else "neutral" if risk_count > 1 else "positive"
-                
-                cards.append(
-                    html.Div([
-                        html.Div("Risk Alerts", className="metric-label"),
-                        html.Div(str(risk_count), className=f"metric-value {risk_color}")
-                    ], className="metric-card")
-                )
-                
-                # Show top opportunities
-                if opportunities:
-                    cards.append(html.Hr(style={"borderColor": "var(--border-color)", "margin": "16px 0"}))
-                    cards.append(
-                        html.Div("🎯 Top Opportunities", style={"color": "var(--accent-green)", "fontWeight": "bold", "marginBottom": "8px"})
-                    )
-                    
-                    for opp in opportunities[:3]:
-                        cards.append(
-                            html.Div([
-                                html.Div(str(opp), 
-                                        style={"fontSize": "11px", "color": "var(--text-secondary)", "padding": "3px 0", "lineHeight": "1.3"})
-                            ])
-                        )
-                
-                return cards
+            except Exception as e:
+                logger.error(f"Error updating LLM tab content: {e}")
+                return [html.Div("🔧 LLM system error", className="llm-thought")]
+        
+        # Market screener removed from new layout
+        # Keeping the callback structure for backwards compatibility
+        # but it won't be displayed
                 
             except Exception as e:
                 logger.error(f"Error updating market screener: {e}")
@@ -1341,12 +1461,11 @@ class Dashboard:
         
         @self.app.callback(
             [Output('performance-metrics', 'children'),
-             Output('positions-panel', 'children'),
-             Output('conversations-panel', 'children')],
+             Output('positions-panel', 'children')],
             [Input('main-interval', 'n_intervals')]
         )
         def update_bottom_panels(n):
-            """Update performance, positions, and conversations panels"""
+            """Update performance and positions panels"""
             try:
                 # Performance Metrics
                 account = self.alpaca.get_account()
@@ -1430,58 +1549,13 @@ class Dashboard:
                         ], style={"background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "borderRadius": "4px"})
                     ]
                 
-                # Conversations
-                conversations = self._get_llm_conversations()[-3:]  # Last 3 conversations
-                conv_cards = []
-                
-                for conv in conversations:
-                    symbol = conv.get('symbol', 'Unknown')
-                    timestamp = conv.get('timestamp', '')
-                    if timestamp:
-                        try:
-                            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                            time_str = dt.strftime("%H:%M")
-                        except:
-                            time_str = timestamp[:5] if len(timestamp) > 5 else timestamp
-                    else:
-                        time_str = "N/A"
-                    
-                    # Try to extract action from response
-                    action = "ANALYZE"
-                    if 'response' in conv:
-                        try:
-                            response_data = json.loads(conv['response'])
-                            action = response_data.get('action', 'ANALYZE').upper()
-                        except:
-                            pass
-                    
-                    action_color = "positive" if action == "BUY" else "negative" if action == "SELL" else "neutral"
-                    
-                    conv_cards.append(
-                        html.Div([
-                            html.Div([
-                                html.Span(f"{symbol}", style={"fontWeight": "bold", "fontSize": "11px", "color": "var(--accent-blue)"}),
-                                html.Span(f"{time_str}", style={"fontSize": "9px", "color": "var(--text-muted)", "marginLeft": "auto"})
-                            ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
-                            html.Div(action, className=f"compact-value {action_color}", style={"fontSize": "10px", "textAlign": "center", "marginTop": "2px"})
-                        ], style={"background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "borderRadius": "4px", "padding": "6px 8px", "margin": "3px 0"})
-                    )
-                
-                if not conv_cards:
-                    conv_cards = [
-                        html.Div([
-                            html.Div("No AI conversations yet", style={"fontSize": "11px", "color": "var(--text-muted)", "textAlign": "center", "padding": "12px"})
-                        ], style={"background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "borderRadius": "4px"})
-                    ]
-                
-                return performance, position_cards, conv_cards
+                return performance, position_cards
                 
             except Exception as e:
                 logger.error(f"Error updating bottom panels: {e}")
                 return (
                     [html.Div("Error loading performance", className="metric-card")],
-                    [html.Div("Error loading positions", className="metric-card")], 
-                    [html.Div("Error loading conversations", className="metric-card")]
+                    [html.Div("Error loading positions", className="metric-card")]
                 )
     
     def _create_empty_chart(self, message: str):

@@ -63,7 +63,8 @@ def test_configuration():
     print("  python scripts/run_dashboard.py     # Real dashboard")
     print("  python scripts/demo_alerts.py       # Alerts demo")
     
-    return True
+    # Use assertion instead of return
+    assert env_file.exists(), ".env file should exist"
 
 if __name__ == "__main__":
     success = test_configuration()

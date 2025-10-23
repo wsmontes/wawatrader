@@ -61,7 +61,10 @@ Format: {"sentiment": "bullish|neutral|bearish", "confidence": 0-100, "reasoning
         print("\n" + "=" * 60)
         print("✅ All tests passed! LM Studio is ready.")
         print("=" * 60)
-        return True
+        
+        # Use assertions instead of return
+        assert client is not None, "Client should be initialized"
+        assert response is not None, "Response should be received"
         
     except Exception as e:
         print("\n" + "=" * 60)
@@ -72,7 +75,7 @@ Format: {"sentiment": "bullish|neutral|bearish", "confidence": 0-100, "reasoning
         print("3. Check that google/gemma-3-4b model is loaded")
         print("4. Try accessing: http://localhost:1234/v1/models")
         print("=" * 60)
-        return False
+        raise  # Re-raise the exception for pytest to catch
 
 
 if __name__ == "__main__":

@@ -64,7 +64,11 @@ def test_alpaca_connection():
         
         if not bars.empty:
             print(f"   Retrieved {len(bars)} bars for {symbol}")
-            print(f"   Date range: {bars['timestamp'].min()} to {bars['timestamp'].max()}")
+            # Use index for dates if timestamp column doesn't exist
+            if 'timestamp' in bars.columns:
+                print(f"   Date range: {bars['timestamp'].min()} to {bars['timestamp'].max()}")
+            else:
+                print(f"   Date range: {bars.index.min()} to {bars.index.max()}")
             print(f"   Latest close: ${bars['close'].iloc[-1]:.2f}")
             print("   ✅ Market data retrieved")
         else:
@@ -75,8 +79,18 @@ def test_alpaca_connection():
         quote = client.get_latest_quote(symbol)
         if quote:
             print(f"   {symbol} Quote:")
-            print(f"   Bid: ${quote['bid_price']:.2f} x {quote['bid_size']}")
-            print(f"   Ask: ${quote['ask_price']:.2f} x {quote['ask_size']}")
+            # Handle different quote data structures
+            if isinstance(quote, dict):
+                bid_price = quote.get('bid_price', quote.get('bp', 0))
+                ask_price = quote.get('ask_price', quote.get('ap', 0))
+                bid_size = quote.get('bid_size', quote.get('bs', 0))
+                ask_size = quote.get('ask_size', quote.get('as', 0))
+                print(f"   Bid: ${bid_price:.2f} x {bid_size}")
+                print(f"   Ask: ${ask_price:.2f} x {ask_size}")
+            else:
+                # Object-based quote
+                print(f"   Bid: ${quote.bid_price:.2f} x {quote.bid_size}")
+                print(f"   Ask: ${quote.ask_price:.2f} x {quote.ask_size}")
             print("   ✅ Quote retrieved")
         else:
             print("   ⚠️ Quote not available (market might be closed)")
@@ -86,16 +100,26 @@ def test_alpaca_connection():
         trade = client.get_latest_trade(symbol)
         if trade:
             print(f"   {symbol} Last Trade:")
-            print(f"   Price: ${trade['price']:.2f}")
-            print(f"   Size: {trade['size']} shares")
-            print(f"   Exchange: {trade['exchange']}")
+            # Handle different trade data structures
+            if isinstance(trade, dict):
+                price = trade.get('price', trade.get('p', 0))
+                size = trade.get('size', trade.get('s', 0))
+                exchange = trade.get('exchange', trade.get('x', 'N/A'))
+                print(f"   Price: ${price:.2f}")
+                print(f"   Size: {size} shares")
+                print(f"   Exchange: {exchange}")
+            else:
+                # Object-based trade
+                print(f"   Price: ${trade.price:.2f}")
+                print(f"   Size: {trade.size} shares")
+                print(f"   Exchange: {trade.exchange}")
             print("   ✅ Trade data retrieved")
         else:
             print("   ⚠️ Trade data not available")
         
         # Test 8: Get news
         print("\n8️⃣ Testing news feed...")
-        news = client.get_news(symbol=symbol, limit=3)
+        news = client.get_news(symbols=[symbol], limit=3)  # symbols is a list
         if news:
             print(f"   Retrieved {len(news)} news articles for {symbol}:")
             for article in news:
@@ -130,7 +154,9 @@ def test_alpaca_connection():
         print("   • Monitor positions and P&L")
         print("=" * 60)
         
-        return True
+        # Use assertions instead of return
+        assert client is not None, "Client should be initialized"
+        assert account is not None, "Account should be accessible"
         
     except Exception as e:
         print("\n" + "=" * 60)
@@ -145,9 +171,8 @@ def test_alpaca_connection():
         print("   cp .env.example .env")
         print("   # Edit .env and add your keys")
         print("=" * 60)
-        return False
+        raise  # Re-raise for pytest to catch
 
 
 if __name__ == "__main__":
-    success = test_alpaca_connection()
-    sys.exit(0 if success else 1)
+    test_alpaca_connection()

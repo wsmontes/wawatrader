@@ -439,6 +439,9 @@ class TradingAgent:
         Args:
             decision: TradingDecision to log
         """
+        # Add to in-memory list
+        self.decisions.append(decision)
+        
         # Convert to dict and handle numpy types
         decision_dict = asdict(decision)
         
