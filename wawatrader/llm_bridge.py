@@ -16,6 +16,17 @@ from openai import OpenAI  # LM Studio uses OpenAI-compatible API
 
 from config.settings import settings
 
+# New modular system (lazy import to avoid circular dependency)
+_modular_analyzer = None
+
+def get_modular_analyzer():
+    """Get or create modular analyzer instance."""
+    global _modular_analyzer
+    if _modular_analyzer is None:
+        from wawatrader.llm_v2 import ModularLLMAnalyzer
+        _modular_analyzer = ModularLLMAnalyzer()
+    return _modular_analyzer
+
 
 class LLMBridge:
     """
@@ -88,18 +99,24 @@ class LLMBridge:
             'name': 'Maximum Revenue and Risk',
             'description': 'Maximum returns with corresponding risk acceptance',
             'system_prompt': (
-                "You are a high-octane trader seeking maximum returns. You identify opportunities aggressively "
-                "and act without hesitation when signals appear. \n\n"
+                "You are a high-octane trader seeking maximum returns through active portfolio rotation. "
+                "You identify opportunities aggressively and act without hesitation.\n\n"
                 "KEY PRINCIPLES:\n"
-                "- Recommend BUY on ANY bullish technical signal, even with minor concerns (≥50% confidence)\n"
-                "- Recommend SELL immediately on bearish signals or negative catalysts (≥45% confidence)\n"
-                "- RARELY recommend HOLD - prefer decisive action in both directions\n"
-                "- Accept substantial risk and volatility for maximum gain potential\n"
+                "- PORTFOLIO MANAGEMENT FIRST: If analyzing an existing position, prioritize SELL decisions to rotate capital into better opportunities\n"
+                "- For NEW opportunities: Recommend BUY on bullish technical signals (≥50% confidence)\n"
+                "- For EXISTING positions: Recommend SELL aggressively on ANY of:\n"
+                "  * Weakening momentum (RSI dropping, MACD turning negative)\n"
+                "  * Better opportunities available elsewhere\n"
+                "  * Profit target reached (even small gains - rotate fast)\n"
+                "  * Position underwater with no recovery signs\n"
+                "- RARELY recommend HOLD - prefer decisive action (BUY new or SELL existing)\n"
+                "- Portfolio rotation creates more opportunities than buy-and-hold\n"
                 "- Set aggressive price targets and wider stop-losses for big moves\n\n"
-                "Respond ONLY with valid JSON. Be bold, decisive, and action-focused."
+                "💡 TRADING WISDOM: 'The best traders rotate capital constantly. Don't marry your positions!'\n\n"
+                "Respond ONLY with valid JSON. Be bold, decisive, and rotation-focused."
             ),
             'min_confidence_buy': 50,
-            'min_confidence_sell': 45,
+            'min_confidence_sell': 40,  # Lower threshold for SELL to enable rotation
             'risk_emphasis': 'minimal'
         }
     }
@@ -299,13 +316,25 @@ class LLMBridge:
                 prompt_parts.extend([
                     "",
                     "=" * 60,
-                    "💼 POSITION MANAGEMENT CONTEXT",
+                    "💼 POSITION MANAGEMENT - CRITICAL",
                     "=" * 60,
-                    f"Current Position: {shares} shares @ ${avg_price:.2f} avg entry",
-                    f"Current P&L: {pnl_pct:+.2f}%",
-                    f"Status: {status}",
+                    f"⚠️  YOU ALREADY OWN: {shares} shares @ ${avg_price:.2f} avg entry",
+                    f"Current Price: ${current_price:.2f}",
+                    f"Position P&L: {pnl_pct:+.2f}%",
+                    f"Position Status: {status}",
                     "",
-                    "Consider: Should you HOLD, ADD to position, or EXIT?",
+                    "🎯 PORTFOLIO MANAGEMENT PRIORITIES:",
+                    "   1. Weak holdings → SELL to free capital for better opportunities",
+                    "   2. Deteriorating technicals → SELL to limit losses",
+                    "   3. Profit targets reached → SELL to lock in gains",
+                    "   4. Better opportunities exist → Consider rotating capital",
+                    "",
+                    "⚡ DECISION OPTIONS:",
+                    "   • SELL: Exit if technicals turned bearish OR profit target reached OR better opportunities available",
+                    "   • HOLD: Keep if trend remains intact and no red flags",
+                    "   • BUY: Add to position ONLY if showing strong bullish continuation (rare)",
+                    "",
+                    "❌ BIAS ALERT: Don't hold losers hoping for recovery - cut losses early!",
                 ])
         
         # Add news as CONTEXT not PRIMARY DRIVER (reduced from 3 to 2 articles)
@@ -564,6 +593,234 @@ class LLMBridge:
             logger.error(f"Error parsing LLM response: {e}")
             return None
     
+    # ========================================================================
+    # NEW MODULAR ANALYSIS METHODS (V2)
+    # ========================================================================
+    
+    def analyze_market_v2(
+        self,
+        symbol: str,
+        signals: Dict[str, Any],
+        news: Optional[List[Dict[str, Any]]] = None,
+        current_position: Optional[Dict[str, Any]] = None,
+        portfolio_summary: Optional[Dict[str, Any]] = None,
+        trigger: str = 'SCHEDULED_CYCLE',
+        overnight_context: Optional[Dict[str, Any]] = None,
+        use_modular: bool = True
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Enhanced market analysis using new modular prompt system.
+        
+        Automatically routes to appropriate query type:
+        - NEW_OPPORTUNITY if no current_position
+        - POSITION_REVIEW if current_position exists
+        
+        Args:
+            symbol: Stock ticker
+            signals: Dict from get_latest_signals()
+            news: Optional news articles
+            current_position: Optional current position info
+            portfolio_summary: Optional portfolio context
+            trigger: What triggered this analysis
+            overnight_context: Optional overnight deep analysis results
+            use_modular: If True, use new modular system; if False, fall back to legacy
+        
+        Args:
+            symbol: Stock ticker
+            signals: Dict from get_latest_signals()
+            news: Optional news articles
+            current_position: Optional current position info
+            portfolio_summary: Optional portfolio context
+            trigger: What triggered this analysis
+            use_modular: If True, use new modular system; if False, fall back to legacy
+        
+        Returns:
+            Parsed LLM analysis with context-aware recommendations
+        """
+        if not use_modular:
+            # Fall back to legacy system
+            return self.analyze_market(symbol, signals, news, current_position)
+        
+        try:
+            analyzer = get_modular_analyzer()
+            
+            # Convert signals to technical_data format
+            technical_data = self._signals_to_technical_data(signals)
+            
+            # DEBUG: Log routing decision
+            logger.debug(f"🔍 Routing decision for {symbol}: current_position={current_position}")
+            
+            # Log overnight context if available
+            if overnight_context:
+                logger.info(f"🌙 Using overnight analysis context for {symbol}")
+                logger.debug(f"   Overnight recommendation: {overnight_context.get('final_recommendation')}")
+            
+            # Route based on context
+            if current_position and current_position.get('qty', 0) > 0:
+                # POSITION REVIEW - analyzing existing holding
+                logger.info(f"📊 Using modular POSITION_REVIEW for {symbol} (qty={current_position.get('qty')})")
+                
+                return analyzer.analyze_position(
+                    symbol=symbol,
+                    technical_data=technical_data,
+                    position_data=current_position,
+                    portfolio_data=portfolio_summary or {},
+                    trigger=trigger,
+                    profile=self.trading_profile,
+                    news=news,
+                    overnight_context=overnight_context
+                )
+            else:
+                # NEW OPPORTUNITY - scanning watchlist
+                logger.info(f"🎯 Using modular NEW_OPPORTUNITY for {symbol}")
+                
+                return analyzer.analyze_new_opportunity(
+                    symbol=symbol,
+                    technical_data=technical_data,
+                    news=news,
+                    profile=self.trading_profile,
+                    trigger=trigger,
+                    overnight_context=overnight_context
+                )
+                
+        except Exception as e:
+            logger.error(f"Modular analysis failed, falling back to legacy: {e}")
+            return self.analyze_market(symbol, signals, news, current_position)
+    
+    def audit_portfolio_v2(
+        self,
+        positions: List[Dict[str, Any]],
+        portfolio_summary: Dict[str, Any],
+        trigger: str = 'SCHEDULED_CYCLE'
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Audit entire portfolio using modular PORTFOLIO_AUDIT query.
+        
+        Returns ranked positions with KEEP/HOLD/SELL recommendations.
+        
+        Args:
+            positions: List of positions with technical data and P&L
+            portfolio_summary: Portfolio summary (value, buying power, etc.)
+            trigger: What triggered this audit
+        
+        Returns:
+            Ranked positions with quality scores
+        """
+        try:
+            analyzer = get_modular_analyzer()
+            
+            logger.info(f"📋 Using modular PORTFOLIO_AUDIT ({len(positions)} positions)")
+            
+            return analyzer.audit_portfolio(
+                positions_data=positions,
+                portfolio_data=portfolio_summary,
+                trigger=trigger,
+                profile=self.trading_profile
+            )
+            
+        except Exception as e:
+            logger.error(f"Portfolio audit failed: {e}")
+            return None
+    
+    def compare_opportunities_v2(
+        self,
+        symbols: List[str],
+        signals_dict: Dict[str, Dict[str, Any]],
+        news_dict: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        trigger: str = 'SCHEDULED_CYCLE'
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Compare multiple opportunities using modular COMPARATIVE_ANALYSIS.
+        
+        Args:
+            symbols: List of symbols to compare
+            signals_dict: Dict mapping symbol -> signals
+            news_dict: Optional dict mapping symbol -> news
+            trigger: What triggered this comparison
+        
+        Returns:
+            Comparative ranking with winner/runner-up/avoid
+        """
+        try:
+            analyzer = get_modular_analyzer()
+            
+            # Convert signals to technical data for each symbol
+            technical_data = {
+                symbol: self._signals_to_technical_data(signals_dict[symbol])
+                for symbol in symbols
+                if symbol in signals_dict
+            }
+            
+            logger.info(f"⚖️  Using modular COMPARATIVE_ANALYSIS ({len(symbols)} stocks)")
+            
+            return analyzer.compare_opportunities(
+                symbols=symbols,
+                technical_data=technical_data,
+                profile=self.trading_profile,
+                trigger=trigger,
+                news=news_dict
+            )
+            
+        except Exception as e:
+            logger.error(f"Comparison analysis failed: {e}")
+            return None
+    
+    def _signals_to_technical_data(self, signals: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert signals format to technical_data format for modular system.
+        
+        Args:
+            signals: Output from get_latest_signals()
+        
+        Returns:
+            Technical data dict for modular components
+        """
+        technical = {}
+        
+        # Price data
+        if 'price' in signals:
+            price = signals['price']
+            technical['price'] = price.get('close')
+            technical['open'] = price.get('open')
+            technical['high'] = price.get('high')
+            technical['low'] = price.get('low')
+        
+        # Trend data
+        if 'trend' in signals:
+            trend = signals['trend']
+            technical['sma20'] = trend.get('sma_20')
+            technical['sma50'] = trend.get('sma_50')
+            technical['macd'] = trend.get('macd')
+            technical['macd_signal'] = trend.get('macd_signal')
+            technical['macd_histogram'] = trend.get('macd_histogram')
+        
+        # Momentum data
+        if 'momentum' in signals:
+            momentum = signals['momentum']
+            technical['rsi'] = momentum.get('rsi')
+        
+        # Volume data
+        if 'volume' in signals:
+            volume = signals['volume']
+            technical['volume'] = volume.get('volume')
+            technical['volume_ratio'] = volume.get('volume_ratio')
+            technical['volume_avg'] = volume.get('volume_avg')
+        
+        # Volatility data
+        if 'volatility' in signals:
+            volatility = signals['volatility']
+            technical['atr'] = volatility.get('atr')
+            technical['bb_upper'] = volatility.get('bb_upper')
+            technical['bb_middle'] = volatility.get('bb_middle')
+            technical['bb_lower'] = volatility.get('bb_lower')
+            technical['bb_width'] = volatility.get('bb_width')
+        
+        return technical
+    
+    # ========================================================================
+    # LEGACY ANALYSIS METHODS (V1 - Backward Compatible)
+    # ========================================================================
+    
     def analyze_market(
         self,
         symbol: str,
@@ -573,6 +830,8 @@ class LLMBridge:
     ) -> Optional[Dict[str, Any]]:
         """
         Complete pipeline: indicators → text → LLM → structured analysis.
+        
+        LEGACY METHOD - Use analyze_market_v2() for modular system.
         
         Args:
             symbol: Stock ticker
@@ -744,15 +1003,22 @@ class LLMBridge:
         
         return scores
     
-    def get_fallback_analysis(self, signals: Dict[str, Any]) -> Dict[str, Any]:
+    def get_fallback_analysis(
+        self, 
+        signals: Dict[str, Any],
+        current_position: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         Fallback analysis when LLM fails.
         
         Uses pure numerical rules (no LLM involvement).
         System must continue operating even if LLM is down.
         
+        NOW INCLUDES: Position management logic for SELL decisions
+        
         Args:
             signals: Dict from get_latest_signals()
+            current_position: Optional current position info
         
         Returns:
             Simple analysis based on indicators
@@ -762,27 +1028,96 @@ class LLMBridge:
         # Extract key indicators
         momentum = signals.get('momentum', {})
         trend = signals.get('trend', {})
+        price = signals.get('price', {})
         
         rsi = momentum.get('rsi', 50)
         macd = trend.get('macd', 0)
         macd_signal = trend.get('macd_signal', 0)
         sma_20 = trend.get('sma_20', 0)
         sma_50 = trend.get('sma_50', 0)
+        current_price = price.get('close', 0)
         
-        # Simple rules
+        # POSITION MANAGEMENT LOGIC
+        if current_position:
+            shares = current_position.get('qty', 0)
+            avg_price = current_position.get('avg_entry_price', 0)
+            
+            if shares > 0 and avg_price > 0 and current_price > 0:
+                pnl_pct = ((current_price - avg_price) / avg_price) * 100
+                
+                # SELL RULES (for existing positions)
+                # 1. Stop loss: Down 5% or more
+                if pnl_pct <= -5:
+                    return {
+                        'sentiment': 'bearish',
+                        'confidence': 75,
+                        'action': 'sell',
+                        'reasoning': f'Stop loss triggered: Position down {pnl_pct:.1f}% - Cut losses',
+                        'risk_factors': ['Stop loss', 'Capital preservation'],
+                        'timestamp': datetime.now().isoformat(),
+                        'fallback_mode': True
+                    }
+                
+                # 2. Take profits: Up 10% or more AND showing weakness
+                if pnl_pct >= 10:
+                    if rsi > 70:  # Overbought
+                        return {
+                            'sentiment': 'profit_taking',
+                            'confidence': 70,
+                            'action': 'sell',
+                            'reasoning': f'Take profits: Up {pnl_pct:.1f}% with RSI overbought ({rsi:.0f}) - Lock in gains',
+                            'risk_factors': ['Overbought conditions', 'Profit protection'],
+                            'timestamp': datetime.now().isoformat(),
+                            'fallback_mode': True
+                        }
+                    elif macd < macd_signal:  # MACD turned bearish
+                        return {
+                            'sentiment': 'profit_taking',
+                            'confidence': 65,
+                            'action': 'sell',
+                            'reasoning': f'Take profits: Up {pnl_pct:.1f}% with MACD weakening - Secure gains',
+                            'risk_factors': ['Momentum weakening', 'Profit protection'],
+                            'timestamp': datetime.now().isoformat(),
+                            'fallback_mode': True
+                        }
+                
+                # 3. Technical breakdown: Bearish signals on existing position
+                bearish_count = 0
+                if rsi < 40:  # Weak momentum
+                    bearish_count += 1
+                if macd < macd_signal:  # Bearish crossover
+                    bearish_count += 1
+                if current_price < sma_20 < sma_50:  # Below moving averages
+                    bearish_count += 1
+                
+                if bearish_count >= 2:
+                    return {
+                        'sentiment': 'bearish',
+                        'confidence': 60,
+                        'action': 'sell',
+                        'reasoning': f'Technical breakdown: {bearish_count}/3 bearish signals - Exit position',
+                        'risk_factors': ['Weak technicals', 'Trend deterioration'],
+                        'timestamp': datetime.now().isoformat(),
+                        'fallback_mode': True
+                    }
+        
+        # BUY/HOLD RULES (for new positions or when holding is OK)
         bullish_signals = 0
         bearish_signals = 0
         
-        if rsi < 30:
+        # RSI signals
+        if rsi < 30:  # Oversold
             bullish_signals += 1
-        elif rsi > 70:
+        elif rsi > 70:  # Overbought
             bearish_signals += 1
         
+        # MACD signals
         if macd > macd_signal:
             bullish_signals += 1
         else:
             bearish_signals += 1
         
+        # Trend signals
         if sma_20 > sma_50:
             bullish_signals += 1
         else:
@@ -792,18 +1127,21 @@ class LLMBridge:
         if bullish_signals > bearish_signals:
             sentiment = "bullish"
             action = "buy"
+            confidence = 50 + (bullish_signals * 5)
         elif bearish_signals > bullish_signals:
             sentiment = "bearish"
-            action = "sell"
+            action = "sell" if current_position else "hold"
+            confidence = 50 + (bearish_signals * 5)
         else:
             sentiment = "neutral"
             action = "hold"
+            confidence = 45
         
         return {
             'sentiment': sentiment,
-            'confidence': 50,  # Low confidence (fallback mode)
+            'confidence': min(confidence, 75),  # Cap at 75% for fallback
             'action': action,
-            'reasoning': 'Fallback analysis based on RSI, MACD, and SMA trend',
+            'reasoning': f'Fallback: {bullish_signals}B/{bearish_signals}Be signals (RSI:{rsi:.0f}, MACD trend, SMA position)',
             'risk_factors': ['LLM unavailable', 'Using simplified rules'],
             'timestamp': datetime.now().isoformat(),
             'fallback_mode': True
@@ -852,6 +1190,176 @@ class LLMBridge:
             }
             for name, config in cls.TRADING_PROFILES.items()
         }
+    
+    def analyze_news_narrative(self, timeline: Any) -> Optional[Dict[str, Any]]:
+        """
+        Synthesize complete news narrative from timeline using LLM.
+        
+        This is Phase 2 of the News Timeline system. The LLM analyzes
+        the complete sequence of news events to understand:
+        1. Initial news vs final consensus
+        2. Contradictions and how they resolved
+        3. Net sentiment and confidence
+        4. Trading recommendation with reasoning
+        
+        Args:
+            timeline: NewsTimeline object with accumulated articles
+            
+        Returns:
+            Dict with narrative synthesis or None if failed
+        """
+        if not timeline or not timeline.events:
+            logger.warning("No news events to analyze")
+            return None
+        
+        try:
+            # Build chronological narrative prompt
+            prompt = self._build_narrative_prompt(timeline)
+            
+            # Get LLM analysis
+            logger.info(f"🤖 Analyzing news narrative for {timeline.symbol} ({len(timeline.events)} articles)")
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a professional financial news analyst. Your job is to analyze "
+                            "the complete timeline of news for a stock and synthesize the narrative. "
+                            "Focus on understanding how the story EVOLVED, not just individual headlines. "
+                            "Detect contradictions and explain how they resolved. "
+                            "Respond ONLY with valid JSON in the specified format."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.3,  # Lower temperature for more consistent analysis
+                max_tokens=1000
+            )
+            
+            # Parse response
+            content = response.choices[0].message.content.strip()
+            
+            # Log conversation
+            self._log_conversation(
+                prompt=prompt,
+                response=content,
+                symbol=getattr(timeline, 'symbol', 'unknown')
+            )
+            
+            # Parse JSON - handle markdown code blocks
+            try:
+                # Remove markdown code blocks if present
+                if content.startswith('```'):
+                    # Remove ```json or ``` at start
+                    lines = content.split('\n')
+                    if lines[0].startswith('```'):
+                        lines = lines[1:]
+                    # Remove ``` at end
+                    if lines and lines[-1].startswith('```'):
+                        lines = lines[:-1]
+                    content = '\n'.join(lines).strip()
+                
+                synthesis = json.loads(content)
+                
+                # Validate required fields
+                required = ['narrative', 'net_sentiment', 'confidence', 'recommendation', 'reasoning']
+                if not all(field in synthesis for field in required):
+                    logger.error(f"Missing required fields in synthesis: {synthesis.keys()}")
+                    return None
+                
+                # Add metadata
+                synthesis['analyzed_at'] = datetime.now().isoformat()
+                synthesis['article_count'] = len(timeline.events)
+                synthesis['symbol'] = getattr(timeline, 'symbol', 'unknown')
+                
+                logger.info(f"✅ Narrative synthesis complete:")
+                logger.info(f"   Sentiment: {synthesis['net_sentiment']}")
+                logger.info(f"   Confidence: {synthesis['confidence']}")
+                logger.info(f"   Recommendation: {synthesis['recommendation']}")
+                
+                return synthesis
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse LLM response as JSON: {e}")
+                logger.debug(f"Response was: {content}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error analyzing news narrative: {e}")
+            return None
+    
+    def _build_narrative_prompt(self, timeline: Any) -> str:
+        """
+        Build prompt for narrative synthesis.
+        
+        Args:
+            timeline: NewsTimeline with events
+            
+        Returns:
+            Structured prompt for LLM
+        """
+        # Sort events chronologically
+        events = sorted(timeline.events, key=lambda x: x.timestamp)
+        
+        # Build timeline text
+        timeline_text = f"SYMBOL: {timeline.symbol}\n"
+        timeline_text += f"DATE: {timeline.date}\n"
+        timeline_text += f"TOTAL ARTICLES: {len(events)}\n\n"
+        timeline_text += "CHRONOLOGICAL TIMELINE:\n"
+        timeline_text += "=" * 80 + "\n\n"
+        
+        for i, article in enumerate(events, 1):
+            time_str = article.timestamp.strftime('%I:%M %p ET')
+            timeline_text += f"{i}. [{time_str}] {article.headline}\n"
+            if article.summary:
+                # Truncate summary to avoid token overflow
+                summary = article.summary[:200] + "..." if len(article.summary) > 200 else article.summary
+                timeline_text += f"   Summary: {summary}\n"
+            timeline_text += f"   Source: {article.source}\n\n"
+        
+        # Build analysis prompt
+        prompt = f"""{timeline_text}
+
+TASK: Analyze the EVOLUTION of this news story throughout the day/overnight.
+
+QUESTIONS TO ANSWER:
+1. What was the INITIAL news that came out first?
+2. How did the narrative DEVELOP over time?
+3. Were there any CONTRADICTIONS? (e.g., bad news followed by good news)
+4. If contradictions exist, which information is more RECENT and CREDIBLE?
+5. What is the FINAL CONSENSUS at the end of the timeline?
+6. What is the NET IMPACT on the stock?
+
+RESPONSE FORMAT (JSON only):
+{{
+    "narrative": "One paragraph summary of how the story evolved",
+    "initial_news": "What came out first",
+    "key_developments": ["Major turning points in the story"],
+    "contradictions": ["Any conflicting information, or empty list"],
+    "net_sentiment": "positive|cautiously_positive|neutral|cautiously_negative|negative",
+    "confidence": 0.0-1.0,
+    "key_themes": ["earnings", "regulatory", "product", "scandal", "market", etc],
+    "recommendation": "BUY|SELL|HOLD|WAIT_FOR_CLARITY",
+    "reasoning": "Why this recommendation based on news narrative",
+    "material_impact": "high|medium|low"
+}}
+
+IMPORTANT GUIDELINES:
+- Focus on NARRATIVE EVOLUTION, not just individual headlines
+- More recent news typically supersedes earlier news
+- Reuters/Bloomberg are more credible than social media
+- Contradictions reduce confidence
+- If story is unclear or contradictory, recommend WAIT_FOR_CLARITY
+- Material impact should reflect how much this news matters for the stock
+
+Respond with ONLY the JSON object, no other text."""
+        
+        return prompt
 
 
 # Convenience function
@@ -927,3 +1435,4 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print("✅ LLM Bridge test complete!")
     print("="*60)
+    

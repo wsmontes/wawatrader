@@ -20,9 +20,10 @@ from loguru import logger
 
 # Modern alpaca-py imports
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import GetOrdersRequest, OrderSide, OrderType, TimeInForce
-from alpaca.trading.enums import OrderStatus, AssetClass
+from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
+from alpaca.trading.enums import OrderStatus, AssetClass, OrderSide, TimeInForce
 from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.historical.news import NewsClient
 from alpaca.data.requests import StockBarsRequest, StockQuotesRequest, StockTradesRequest, NewsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.common.exceptions import APIError
@@ -52,6 +53,12 @@ class AlpacaClient:
             
             # Initialize market data client  
             self.data_client = StockHistoricalDataClient(
+                api_key=settings.alpaca.api_key,
+                secret_key=settings.alpaca.secret_key
+            )
+            
+            # Initialize news client
+            self.news_client = NewsClient(
                 api_key=settings.alpaca.api_key,
                 secret_key=settings.alpaca.secret_key
             )
@@ -450,7 +457,7 @@ class AlpacaClient:
 
     def get_news(
         self, 
-        symbols: List[str], 
+        symbols: Union[str, List[str]], 
         start: Optional[datetime] = None,
         end: Optional[datetime] = None,
         limit: int = 50
@@ -459,7 +466,7 @@ class AlpacaClient:
         Get news articles for symbols
         
         Args:
-            symbols: List of symbols
+            symbols: Symbol or list of symbols (API accepts comma-separated string)
             start: Start date
             end: End date  
             limit: Maximum number of articles
@@ -472,25 +479,36 @@ class AlpacaClient:
                 start = datetime.now() - timedelta(days=7)
             if end is None:
                 end = datetime.now()
+            
+            # Convert symbols to comma-separated string as API expects
+            if isinstance(symbols, list):
+                symbols_str = ','.join(symbols)
+            else:
+                symbols_str = symbols
                 
             request = NewsRequest(
-                symbols=symbols,
+                symbols=symbols_str,  # API expects comma-separated string
                 start=start,
                 end=end,
                 limit=limit
             )
             
-            news = self.data_client.get_news(request)
+            # Use news_client instead of data_client
+            news = self.news_client.get_news(request)
             
+            # news.data is a dict with 'news' key containing list of News objects
             articles = []
-            for article in news.data:
+            news_items = news.data.get('news', []) if hasattr(news, 'data') else []
+            
+            for article in news_items:
+                # Articles are News objects with attributes
                 articles.append({
                     'id': article.id,
                     'headline': article.headline,
                     'summary': article.summary,
                     'author': article.author,
-                    'created_at': article.created_at.isoformat(),
-                    'updated_at': article.updated_at.isoformat() if article.updated_at else None,
+                    'created_at': article.created_at.isoformat() if hasattr(article.created_at, 'isoformat') else str(article.created_at),
+                    'updated_at': article.updated_at.isoformat() if article.updated_at and hasattr(article.updated_at, 'isoformat') else None,
                     'url': article.url,
                     'symbols': article.symbols if article.symbols else []
                 })
@@ -498,6 +516,8 @@ class AlpacaClient:
             return articles
             
         except Exception as e:
+            logger.error(f"❌ Error getting news: {e}")
+            return []
             logger.error(f"❌ Error getting news: {e}")
             return []
 
@@ -612,6 +632,102 @@ class AlpacaClient:
                 'status_message': 'Unable to determine market status',
                 'error': str(e)
             }
+    
+    def place_market_order(self, symbol: str, qty: int, side: str, 
+                          time_in_force: str = 'day') -> Optional[Dict[str, Any]]:
+        """
+        Place a market order
+        
+        Args:
+            symbol: Stock symbol
+            qty: Number of shares
+            side: 'buy' or 'sell'
+            time_in_force: Order duration ('day', 'gtc', 'ioc', 'fok')
+            
+        Returns:
+            Order details dict or None if failed
+        """
+        try:
+            # Convert side string to enum
+            order_side = OrderSide.BUY if side.lower() == 'buy' else OrderSide.SELL
+            
+            # Convert time_in_force string to enum
+            tif_map = {
+                'day': TimeInForce.DAY,
+                'gtc': TimeInForce.GTC,
+                'ioc': TimeInForce.IOC,
+                'fok': TimeInForce.FOK
+            }
+            tif = tif_map.get(time_in_force.lower(), TimeInForce.DAY)
+            
+            # Create market order request
+            request = MarketOrderRequest(
+                symbol=symbol,
+                qty=qty,
+                side=order_side,
+                time_in_force=tif
+            )
+            
+            # Submit order
+            order = self.trading_client.submit_order(request)
+            
+            # Convert to dict
+            return {
+                'id': order.id,
+                'client_order_id': order.client_order_id,
+                'created_at': order.created_at.isoformat() if order.created_at else None,
+                'symbol': order.symbol,
+                'qty': float(order.qty) if order.qty else 0.0,
+                'side': order.side.value,
+                'type': order.order_type.value,
+                'status': order.status.value,
+                'filled_avg_price': float(order.filled_avg_price) if order.filled_avg_price else 0.0,
+                'filled_qty': float(order.filled_qty) if order.filled_qty else 0.0
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error placing market order for {symbol}: {e}")
+            return None
+    
+    def wait_for_order_fill(self, order_id: str, timeout_seconds: int = 30) -> Optional[Dict[str, Any]]:
+        """
+        Wait for an order to fill
+        
+        Args:
+            order_id: Order ID to wait for
+            timeout_seconds: Maximum time to wait
+            
+        Returns:
+            Final order details or None if timeout
+        """
+        import time
+        
+        try:
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout_seconds:
+                order = self.trading_client.get_order_by_id(order_id)
+                
+                if order.status.value in ['filled', 'canceled', 'expired', 'rejected']:
+                    return {
+                        'id': order.id,
+                        'symbol': order.symbol,
+                        'qty': float(order.qty) if order.qty else 0.0,
+                        'side': order.side.value,
+                        'status': order.status.value,
+                        'filled_avg_price': float(order.filled_avg_price) if order.filled_avg_price else 0.0,
+                        'filled_qty': float(order.filled_qty) if order.filled_qty else 0.0
+                    }
+                
+                time.sleep(0.5)  # Check every 500ms
+            
+            # Timeout
+            logger.warning(f"⏰ Order {order_id} did not fill within {timeout_seconds}s")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Error waiting for order fill: {e}")
+            return None
 
     def get_orders(self, status: str = 'open') -> List[Dict[str, Any]]:
         """
@@ -671,6 +787,70 @@ class AlpacaClient:
             logger.error(f"❌ Error getting orders: {e}")
             return []
 
+    def get_active_stocks(self, min_price: float = 5.0, max_price: float = 1000.0, 
+                         asset_class: str = 'us_equity', limit: int = 100) -> List[str]:
+        """
+        Get list of actively traded stocks from Alpaca
+        
+        Returns a curated list of highly liquid, well-known stocks suitable for algorithmic trading.
+        Prioritizes stocks with high market cap, volume, and institutional interest.
+        
+        Args:
+            min_price: Minimum stock price (default $5 to avoid penny stocks)
+            max_price: Maximum stock price (default $1000)
+            asset_class: Asset class to filter (default 'us_equity')
+            limit: Maximum number of symbols to return
+            
+        Returns:
+            List of stock symbols suitable for trading
+        """
+        # Return curated list of highly liquid stocks
+        # These are among the most actively traded US equities with:
+        # - High market capitalization
+        # - High average daily volume
+        # - Wide institutional ownership
+        # - Good price discovery
+        # - Low bid-ask spreads
+        
+        highly_liquid_stocks = [
+            # Mega-cap tech
+            'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA',
+            'AVGO', 'ORCL', 'AMD', 'ADBE', 'CRM', 'CSCO', 'INTC', 'QCOM',
+            'TXN', 'AMAT', 'MU', 'NOW', 'PANW', 'INTU', 'SNPS', 'CDNS',
+            
+            # Financial services
+            'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'BX', 'SCHW', 'AXP',
+            'USB', 'PNC', 'TFC', 'COF', 'BLK', 'SPGI', 'CME', 'ICE',
+            
+            # Healthcare
+            'JNJ', 'UNH', 'LLY', 'ABBV', 'MRK', 'PFE', 'TMO', 'ABT',
+            'DHR', 'BMY', 'AMGN', 'GILD', 'CVS', 'CI', 'ISRG', 'VRTX',
+            
+            # Consumer
+            'WMT', 'COST', 'HD', 'LOW', 'TGT', 'NKE', 'SBUX', 'MCD',
+            'DIS', 'NFLX', 'CMCSA', 'PM', 'PEP', 'KO', 'PG', 'CL',
+            
+            # Industrial
+            'CAT', 'GE', 'BA', 'HON', 'UPS', 'RTX', 'LMT', 'DE',
+            'UNP', 'MMM', 'EMR', 'ITW', 'ETN', 'GD', 'NOC',
+            
+            # Energy
+            'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'PSX', 'VLO',
+            
+            # Communications
+            'T', 'VZ', 'TMUS',
+            
+            # Real Estate & REITs  
+            'AMT', 'PLD', 'CCI', 'EQIX', 'PSA', 'DLR', 'SPG', 'O',
+            
+            # ETFs (for market exposure)
+            'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI', 'ARKK', 'XLF',
+            'XLE', 'XLK', 'XLV', 'XLY', 'XLP', 'XLI', 'XLU', 'XLB'
+        ]
+        
+        logger.info(f"✅ Returning curated watchlist of {min(len(highly_liquid_stocks), limit)} highly liquid stocks")
+        return highly_liquid_stocks[:limit]
+    
     def get_account_summary(self) -> str:
         """
         Get formatted account summary

@@ -269,10 +269,11 @@ class Dashboard:
                         background: var(--glass-bg);
                         border: 1px solid var(--glass-border);
                         border-radius: 8px;
-                        padding: 20px;
+                        padding: 12px;
                         overflow: hidden;
                         min-height: 0;
-                        max-height: calc(100vh - 130px);
+                        max-height: calc(100vh - 100px);
+                        height: calc(100vh - 100px);
                         position: relative;
                         display: flex;
                         flex-direction: column;
@@ -281,8 +282,8 @@ class Dashboard:
                     .llm-thought {
                         background: rgba(0, 170, 255, 0.1);
                         border-left: 3px solid var(--accent-blue);
-                        padding: 12px;
-                        margin: 8px 0;
+                        padding: 8px 10px;
+                        margin: 6px 0;
                         border-radius: 0 6px 6px 0;
                         font-family: 'JetBrains Mono', monospace;
                         font-size: 11px;
@@ -295,9 +296,9 @@ class Dashboard:
                     
                     .confidence-bar {
                         background: var(--bg-tertiary);
-                        height: 6px;
+                        height: 5px;
                         border-radius: 3px;
-                        margin: 8px 0;
+                        margin: 6px 0;
                         overflow: hidden;
                     }
                     
@@ -313,14 +314,16 @@ class Dashboard:
                         top: 0;
                         background: var(--glass-bg);
                         padding-bottom: 8px;
-                        margin-bottom: 8px;
+                        margin-bottom: 6px;
                         border-bottom: 1px solid var(--glass-border);
                         z-index: 10;
+                        flex-shrink: 0;
                     }
                     
                     /* Custom Dash Tabs Styling */
                     .custom-tabs-container {
-                        margin-bottom: 12px;
+                        margin-bottom: 0;
+                        flex-shrink: 0;
                     }
                     
                     .custom-tabs {
@@ -333,12 +336,12 @@ class Dashboard:
                         border: 1px solid var(--border-color) !important;
                         border-bottom: 2px solid var(--border-color) !important;
                         color: var(--text-muted) !important;
-                        padding: 10px 20px !important;
-                        font-size: 12px !important;
+                        padding: 6px 14px !important;
+                        font-size: 11px !important;
                         font-weight: 500 !important;
                         transition: all 0.2s ease !important;
                         border-radius: 6px 6px 0 0 !important;
-                        margin-right: 4px !important;
+                        margin-right: 2px !important;
                         min-height: auto !important;
                     }
                     
@@ -363,7 +366,11 @@ class Dashboard:
                         overflow-y: auto;
                         overflow-x: hidden;
                         padding-right: 8px;
-                        padding-top: 8px;
+                        padding-top: 4px;
+                        padding-left: 4px;
+                        padding-bottom: 4px;
+                        flex: 1;
+                        min-height: 0;
                         scrollbar-width: thin;
                         scrollbar-color: var(--accent-blue) var(--bg-secondary);
                     }
@@ -480,6 +487,44 @@ class Dashboard:
                     .positive { color: var(--accent-green); }
                     .negative { color: var(--accent-red); }
                     .neutral { color: var(--text-secondary); }
+                    
+                    /* LLM Refresh Button */
+                    .llm-refresh-btn:hover {
+                        background: rgba(0, 170, 255, 0.2) !important;
+                        border-color: #00aaff !important;
+                        transform: scale(1.05);
+                    }
+                    
+                    .llm-refresh-btn:active {
+                        transform: scale(0.95);
+                    }
+                    
+                    /* LLM Tab improvements */
+                    .llm-thoughts-container {
+                        flex: 1;
+                        min-height: 0;
+                        overflow-y: auto;
+                        overflow-x: hidden;
+                        padding: 8px 12px;
+                    }
+                    
+                    .llm-thoughts-container::-webkit-scrollbar {
+                        width: 8px;
+                    }
+                    
+                    .llm-thoughts-container::-webkit-scrollbar-track {
+                        background: rgba(0, 0, 0, 0.2);
+                        border-radius: 4px;
+                    }
+                    
+                    .llm-thoughts-container::-webkit-scrollbar-thumb {
+                        background: rgba(0, 170, 255, 0.4);
+                        border-radius: 4px;
+                    }
+                    
+                    .llm-thoughts-container::-webkit-scrollbar-thumb:hover {
+                        background: rgba(0, 170, 255, 0.6);
+                    }
                     
                     /* Configuration Modal */
                     .config-button {
@@ -849,6 +894,100 @@ class Dashboard:
                         document.getElementById(inactiveTab).className = 'config-tab';
                     }
                     
+                    // LLM Tab auto-scroll management
+                    let llmAutoScroll = true;
+                    let lastConversationCount = 0;
+                    let lastScrollHeight = 0;
+                    let userIsScrolling = false;
+                    let scrollTimeout = null;
+                    
+                    function checkLLMScroll() {
+                        const container = document.querySelector('.llm-thoughts-container');
+                        if (!container) return;
+                        
+                        const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+                        
+                        if (!isAtBottom && userIsScrolling) {
+                            // User has scrolled away from bottom
+                            llmAutoScroll = false;
+                            const indicator = document.getElementById('llm-scroll-indicator');
+                            if (indicator) indicator.style.display = 'block';
+                        } else if (isAtBottom) {
+                            // User is at bottom, enable auto-scroll
+                            llmAutoScroll = true;
+                            const indicator = document.getElementById('llm-scroll-indicator');
+                            if (indicator) indicator.style.display = 'none';
+                        }
+                    }
+                    
+                    function scrollToLatest(force = false) {
+                        const container = document.querySelector('.llm-thoughts-container');
+                        if (!container) return;
+                        
+                        const currentScrollHeight = container.scrollHeight;
+                        
+                        // Only auto-scroll if:
+                        // 1. Auto-scroll is enabled (user at bottom or forced)
+                        // 2. Content has actually changed (new conversations added)
+                        if ((llmAutoScroll || force) && currentScrollHeight !== lastScrollHeight) {
+                            container.scrollTop = container.scrollHeight;
+                            lastScrollHeight = currentScrollHeight;
+                        }
+                    }
+                    
+                    function onUserScroll() {
+                        userIsScrolling = true;
+                        
+                        // Clear existing timeout
+                        if (scrollTimeout) {
+                            clearTimeout(scrollTimeout);
+                        }
+                        
+                        // Set flag that user is done scrolling after 500ms of no scroll events
+                        scrollTimeout = setTimeout(() => {
+                            userIsScrolling = false;
+                            checkLLMScroll();
+                        }, 500);
+                        
+                        // Immediately check scroll position
+                        checkLLMScroll();
+                    }
+                    
+                    // Click handler for scroll indicator
+                    function scrollLLMToBottom() {
+                        const container = document.querySelector('.llm-thoughts-container');
+                        if (container) {
+                            llmAutoScroll = true;
+                            userIsScrolling = false;
+                            container.scrollTo({
+                                top: container.scrollHeight,
+                                behavior: 'smooth'
+                            });
+                            const indicator = document.getElementById('llm-scroll-indicator');
+                            if (indicator) indicator.style.display = 'none';
+                        }
+                    }
+                    
+                    // Mutation observer to detect content changes
+                    function setupContentObserver() {
+                        const container = document.querySelector('.llm-thoughts-container');
+                        if (!container) {
+                            // Retry after a short delay if container not found
+                            setTimeout(setupContentObserver, 500);
+                            return;
+                        }
+                        
+                        const observer = new MutationObserver((mutations) => {
+                            // Content has changed, scroll if auto-scroll enabled
+                            scrollToLatest();
+                        });
+                        
+                        observer.observe(container, {
+                            childList: true,
+                            subtree: true
+                        });
+                    }
+                    
                     // Initialize when DOM is ready
                     document.addEventListener('DOMContentLoaded', function() {
                         // Add click handlers
@@ -875,7 +1014,21 @@ class Dashboard:
                             });
                         }
                         
-                        console.log('Config modal handlers initialized');
+                        // LLM scroll management
+                        const llmContainer = document.querySelector('.llm-thoughts-container');
+                        if (llmContainer) {
+                            llmContainer.addEventListener('scroll', onUserScroll);
+                        }
+                        
+                        const scrollIndicator = document.getElementById('llm-scroll-indicator');
+                        if (scrollIndicator) {
+                            scrollIndicator.addEventListener('click', scrollLLMToBottom);
+                        }
+                        
+                        // Setup mutation observer to detect content changes
+                        setupContentObserver();
+                        
+                        console.log('Config modal and smart LLM scroll handlers initialized');
                     });
                 </script>
             </head>
@@ -940,7 +1093,20 @@ class Dashboard:
                     html.Div([
                         html.I(className="fas fa-brain", style={"marginRight": "8px", "color": "var(--accent-blue)"}),
                         html.H5("LLM Data", style={"margin": "0", "color": "var(--accent-blue)", "fontSize": "14px"}),
-                        html.Div("🧠", style={"marginLeft": "auto", "fontSize": "16px"})
+                        html.Div([
+                            html.Button("🔄", id="llm-refresh-btn", n_clicks=0, style={
+                                "background": "transparent",
+                                "border": "1px solid rgba(0, 170, 255, 0.3)",
+                                "color": "#00aaff",
+                                "padding": "4px 8px",
+                                "borderRadius": "4px",
+                                "cursor": "pointer",
+                                "fontSize": "14px",
+                                "marginRight": "8px",
+                                "transition": "all 0.2s"
+                            }, className="llm-refresh-btn"),
+                            html.Div("🧠", style={"fontSize": "16px"})
+                        ], style={"marginLeft": "auto", "display": "flex", "alignItems": "center"})
                     ], className="llm-mind-header", style={"display": "flex", "alignItems": "center"}),
                     
                     # Tabs for Raw Data vs Formatted
@@ -951,22 +1117,93 @@ class Dashboard:
                         parent_className='custom-tabs-container',
                         children=[
                             dcc.Tab(
-                                label='📊 Raw Data', 
+                                label='� Conversations', 
+                                value='formatted',
+                                className='custom-tab',
+                                selected_className='custom-tab--selected'
+                            ),
+                            dcc.Tab(
+                                label='� Raw JSON', 
                                 value='raw',
                                 className='custom-tab',
                                 selected_className='custom-tab--selected'
                             ),
                             dcc.Tab(
-                                label='💬 Formatted', 
-                                value='formatted',
+                                label='📈 Stats', 
+                                value='stats',
                                 className='custom-tab',
                                 selected_className='custom-tab--selected'
                             )
                         ]
                     ),
                     
-                    # Tab content
-                    html.Div(id="llm-tab-content", className="llm-thoughts-container")
+                    # Time range and filter controls
+                    html.Div([
+                        html.Div([
+                            html.Label("Show:", style={"fontSize": "11px", "color": "var(--text-muted)", "marginRight": "6px"}),
+                            dcc.Dropdown(
+                                id='llm-time-range',
+                                options=[
+                                    {'label': 'Last 5', 'value': 5},
+                                    {'label': 'Last 10', 'value': 10},
+                                    {'label': 'Last 20', 'value': 20},
+                                    {'label': 'Last 50', 'value': 50},
+                                    {'label': 'All', 'value': -1}
+                                ],
+                                value=10,
+                                clearable=False,
+                                style={"width": "100px", "fontSize": "11px"}
+                            )
+                        ], style={"display": "flex", "alignItems": "center", "marginRight": "12px"}),
+                        html.Div([
+                            html.Label("Type:", style={"fontSize": "11px", "color": "var(--text-muted)", "marginRight": "6px"}),
+                            dcc.Dropdown(
+                                id='llm-filter-type',
+                                options=[
+                                    {'label': 'All', 'value': 'all'},
+                                    {'label': 'Market Intel', 'value': 'market'},
+                                    {'label': 'Stock Analysis', 'value': 'stock'},
+                                    {'label': 'High Confidence', 'value': 'high_conf'}
+                                ],
+                                value='all',
+                                clearable=False,
+                                style={"width": "130px", "fontSize": "11px"}
+                            )
+                        ], style={"display": "flex", "alignItems": "center"})
+                    ], style={
+                        "display": "flex", 
+                        "padding": "6px 12px", 
+                        "background": "rgba(0, 0, 0, 0.2)",
+                        "borderBottom": "1px solid rgba(255, 255, 255, 0.05)",
+                        "flex-shrink": 0
+                    }),
+                    
+                    # Tab content with scroll indicator
+                    html.Div([
+                        html.Div(id="llm-tab-content", className="llm-thoughts-container"),
+                        html.Div(id="llm-scroll-indicator", style={
+                            "position": "absolute",
+                            "bottom": "8px",
+                            "right": "8px",
+                            "background": "rgba(0, 170, 255, 0.8)",
+                            "color": "white",
+                            "padding": "5px 10px",
+                            "borderRadius": "16px",
+                            "fontSize": "10px",
+                            "fontWeight": "600",
+                            "cursor": "pointer",
+                            "display": "none",
+                            "zIndex": "10",
+                            "boxShadow": "0 2px 8px rgba(0, 0, 0, 0.3)"
+                        }, children="↓ New Updates")
+                    ], style={
+                        "position": "relative", 
+                        "flex": "1", 
+                        "overflow": "hidden",
+                        "display": "flex",
+                        "flexDirection": "column",
+                        "minHeight": "0"
+                    })
                 ], className="llm-mind"),
                 
                 # Chart Panel (Top Right)
@@ -1311,10 +1548,13 @@ class Dashboard:
         @self.app.callback(
             Output('llm-tab-content', 'children'),
             [Input('llm-interval', 'n_intervals'),
-             Input('llm-tabs', 'value')]
+             Input('llm-tabs', 'value'),
+             Input('llm-time-range', 'value'),
+             Input('llm-filter-type', 'value'),
+             Input('llm-refresh-btn', 'n_clicks')]
         )
-        def update_llm_tab_content(n, tab):
-            """Update LLM tab content based on selected tab"""
+        def update_llm_tab_content(n, tab, time_range, filter_type, refresh_clicks):
+            """Update LLM tab content based on selected tab with time management"""
             try:
                 # Get recent LLM conversations
                 conversations = self._get_llm_conversations()
@@ -1335,7 +1575,288 @@ class Dashboard:
                         ])
                     ]
                 
-                if tab == 'raw':
+                # Apply time range filter (convert to int, handle 'all' case)
+                try:
+                    time_range_int = int(time_range) if time_range and time_range != 'all' else 0
+                    if time_range_int > 0:
+                        conversations = conversations[-time_range_int:]
+                except (ValueError, TypeError):
+                    # If conversion fails, use all conversations
+                    pass
+                
+                # Apply type filter
+                filtered_conversations = []
+                for conv in conversations:
+                    if filter_type == 'all':
+                        filtered_conversations.append(conv)
+                    elif filter_type == 'market':
+                        symbol = conv.get('symbol', '').lower()
+                        if symbol in ['unknown', 'market'] or 'MARKET SCREENING' in conv.get('prompt', ''):
+                            filtered_conversations.append(conv)
+                    elif filter_type == 'stock':
+                        symbol = conv.get('symbol', '').lower()
+                        if symbol not in ['unknown', 'market'] and 'MARKET SCREENING' not in conv.get('prompt', ''):
+                            filtered_conversations.append(conv)
+                    elif filter_type == 'high_conf':
+                        try:
+                            if 'response' in conv:
+                                response_data = json.loads(conv['response'].replace('```json\n', '').replace('\n```', ''))
+                                confidence = response_data.get('confidence', 0)
+                                if confidence >= 75:
+                                    filtered_conversations.append(conv)
+                        except:
+                            pass
+                
+                conversations = filtered_conversations
+                
+                if not conversations:
+                    return [
+                        html.Div([
+                            html.Div("🔍 No conversations match the selected filters", 
+                                   style={
+                                       "textAlign": "center",
+                                       "color": "var(--text-muted)",
+                                       "padding": "40px 20px",
+                                       "fontSize": "13px"
+                                   })
+                        ])
+                    ]
+                
+                if tab == 'stats':
+                    # Show statistics and summary
+                    total_count = len(conversations)
+                    market_intel_count = sum(1 for c in conversations if c.get('symbol', '').lower() in ['unknown', 'market'] or 'MARKET SCREENING' in c.get('prompt', ''))
+                    stock_analysis_count = total_count - market_intel_count
+                    
+                    # Calculate average confidence
+                    confidences = []
+                    decisions = {'BUY': 0, 'SELL': 0, 'HOLD': 0}
+                    sentiments = {'BULLISH': 0, 'BEARISH': 0, 'NEUTRAL': 0}
+                    
+                    for conv in conversations:
+                        if 'response' in conv:
+                            try:
+                                response_data = json.loads(conv['response'].replace('```json\n', '').replace('\n```', ''))
+                                conf = response_data.get('confidence', 0)
+                                if conf > 0:
+                                    confidences.append(conf)
+                                
+                                decision = response_data.get('decision', '').upper()
+                                if decision in decisions:
+                                    decisions[decision] += 1
+                                
+                                sentiment = response_data.get('market_sentiment', '').upper()
+                                if sentiment in sentiments:
+                                    sentiments[sentiment] += 1
+                            except:
+                                pass
+                    
+                    avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+                    
+                    # Get time range
+                    if conversations:
+                        try:
+                            first_time = datetime.fromisoformat(conversations[0].get('timestamp', '').replace('Z', '+00:00'))
+                            last_time = datetime.fromisoformat(conversations[-1].get('timestamp', '').replace('Z', '+00:00'))
+                            time_span = last_time - first_time
+                            hours = time_span.total_seconds() / 3600
+                            time_range_str = f"{hours:.1f} hours" if hours < 24 else f"{hours/24:.1f} days"
+                        except:
+                            time_range_str = "N/A"
+                    else:
+                        time_range_str = "N/A"
+                    
+                    return [
+                        html.Div([
+                            # Summary cards
+                            html.Div([
+                                # Total conversations
+                                html.Div([
+                                    html.Div("📊", style={"fontSize": "24px", "marginBottom": "8px"}),
+                                    html.Div(str(total_count), style={
+                                        "fontSize": "28px",
+                                        "fontWeight": "700",
+                                        "color": "#00aaff",
+                                        "marginBottom": "4px"
+                                    }),
+                                    html.Div("Total Analyses", style={
+                                        "fontSize": "11px",
+                                        "color": "var(--text-muted)"
+                                    })
+                                ], style={
+                                    "flex": "1",
+                                    "padding": "20px",
+                                    "background": "rgba(0, 170, 255, 0.1)",
+                                    "borderRadius": "8px",
+                                    "textAlign": "center",
+                                    "border": "1px solid rgba(0, 170, 255, 0.2)"
+                                }),
+                                
+                                # Average confidence
+                                html.Div([
+                                    html.Div("🎯", style={"fontSize": "24px", "marginBottom": "8px"}),
+                                    html.Div(f"{avg_confidence:.0f}%", style={
+                                        "fontSize": "28px",
+                                        "fontWeight": "700",
+                                        "color": "#00ff88" if avg_confidence >= 70 else "#ffaa00",
+                                        "marginBottom": "4px"
+                                    }),
+                                    html.Div("Avg Confidence", style={
+                                        "fontSize": "11px",
+                                        "color": "var(--text-muted)"
+                                    })
+                                ], style={
+                                    "flex": "1",
+                                    "padding": "20px",
+                                    "background": "rgba(0, 255, 136, 0.1)",
+                                    "borderRadius": "8px",
+                                    "textAlign": "center",
+                                    "border": "1px solid rgba(0, 255, 136, 0.2)"
+                                }),
+                                
+                                # Time range
+                                html.Div([
+                                    html.Div("⏱️", style={"fontSize": "24px", "marginBottom": "8px"}),
+                                    html.Div(time_range_str, style={
+                                        "fontSize": "18px",
+                                        "fontWeight": "700",
+                                        "color": "#ffaa00",
+                                        "marginBottom": "4px"
+                                    }),
+                                    html.Div("Time Span", style={
+                                        "fontSize": "11px",
+                                        "color": "var(--text-muted)"
+                                    })
+                                ], style={
+                                    "flex": "1",
+                                    "padding": "20px",
+                                    "background": "rgba(255, 170, 0, 0.1)",
+                                    "borderRadius": "8px",
+                                    "textAlign": "center",
+                                    "border": "1px solid rgba(255, 170, 0, 0.2)"
+                                })
+                            ], style={
+                                "display": "flex",
+                                "gap": "12px",
+                                "marginBottom": "20px"
+                            }),
+                            
+                            # Breakdown by type
+                            html.Div([
+                                html.Div("Analysis Breakdown", style={
+                                    "fontSize": "13px",
+                                    "fontWeight": "600",
+                                    "color": "var(--text-secondary)",
+                                    "marginBottom": "12px"
+                                }),
+                                html.Div([
+                                    html.Div([
+                                        html.Div("🌍 Market Intelligence", style={"fontSize": "12px", "color": "var(--text-secondary)", "marginBottom": "4px"}),
+                                        html.Div([
+                                            html.Div(style={
+                                                "width": f"{(market_intel_count/total_count*100) if total_count > 0 else 0}%",
+                                                "height": "20px",
+                                                "background": "linear-gradient(90deg, #00aaff, #0088cc)",
+                                                "borderRadius": "4px",
+                                                "transition": "width 0.3s"
+                                            }),
+                                            html.Span(f"{market_intel_count}", style={
+                                                "marginLeft": "8px",
+                                                "fontSize": "12px",
+                                                "fontWeight": "600",
+                                                "color": "#00aaff"
+                                            })
+                                        ], style={"display": "flex", "alignItems": "center", "marginBottom": "12px"})
+                                    ]),
+                                    html.Div([
+                                        html.Div("📈 Stock Analysis", style={"fontSize": "12px", "color": "var(--text-secondary)", "marginBottom": "4px"}),
+                                        html.Div([
+                                            html.Div(style={
+                                                "width": f"{(stock_analysis_count/total_count*100) if total_count > 0 else 0}%",
+                                                "height": "20px",
+                                                "background": "linear-gradient(90deg, #00ff88, #00cc66)",
+                                                "borderRadius": "4px",
+                                                "transition": "width 0.3s"
+                                            }),
+                                            html.Span(f"{stock_analysis_count}", style={
+                                                "marginLeft": "8px",
+                                                "fontSize": "12px",
+                                                "fontWeight": "600",
+                                                "color": "#00ff88"
+                                            })
+                                        ], style={"display": "flex", "alignItems": "center"})
+                                    ])
+                                ], style={
+                                    "background": "rgba(0, 0, 0, 0.2)",
+                                    "padding": "16px",
+                                    "borderRadius": "8px"
+                                })
+                            ], style={"marginBottom": "20px"}),
+                            
+                            # Decisions breakdown
+                            html.Div([
+                                html.Div("Trading Decisions", style={
+                                    "fontSize": "13px",
+                                    "fontWeight": "600",
+                                    "color": "var(--text-secondary)",
+                                    "marginBottom": "12px"
+                                }),
+                                html.Div([
+                                    html.Div([
+                                        html.Span("🟢 BUY: ", style={"fontSize": "12px", "color": "#00ff88", "fontWeight": "600"}),
+                                        html.Span(f"{decisions['BUY']}", style={"fontSize": "12px", "color": "var(--text-secondary)"})
+                                    ], style={"marginBottom": "8px"}),
+                                    html.Div([
+                                        html.Span("🔵 HOLD: ", style={"fontSize": "12px", "color": "#00aaff", "fontWeight": "600"}),
+                                        html.Span(f"{decisions['HOLD']}", style={"fontSize": "12px", "color": "var(--text-secondary)"})
+                                    ], style={"marginBottom": "8px"}),
+                                    html.Div([
+                                        html.Span("🔴 SELL: ", style={"fontSize": "12px", "color": "#ff4444", "fontWeight": "600"}),
+                                        html.Span(f"{decisions['SELL']}", style={"fontSize": "12px", "color": "var(--text-secondary)"})
+                                    ])
+                                ], style={
+                                    "background": "rgba(0, 0, 0, 0.2)",
+                                    "padding": "16px",
+                                    "borderRadius": "8px",
+                                    "display": "flex",
+                                    "flexDirection": "column"
+                                })
+                            ], style={"marginBottom": "20px"}),
+                            
+                            # Market sentiment breakdown
+                            html.Div([
+                                html.Div("Market Sentiment", style={
+                                    "fontSize": "13px",
+                                    "fontWeight": "600",
+                                    "color": "var(--text-secondary)",
+                                    "marginBottom": "12px"
+                                }),
+                                html.Div([
+                                    html.Div([
+                                        html.Span("📈 BULLISH: ", style={"fontSize": "12px", "color": "#00ff88", "fontWeight": "600"}),
+                                        html.Span(f"{sentiments['BULLISH']}", style={"fontSize": "12px", "color": "var(--text-secondary)"})
+                                    ], style={"marginBottom": "8px"}),
+                                    html.Div([
+                                        html.Span("➖ NEUTRAL: ", style={"fontSize": "12px", "color": "#ffaa00", "fontWeight": "600"}),
+                                        html.Span(f"{sentiments['NEUTRAL']}", style={"fontSize": "12px", "color": "var(--text-secondary)"})
+                                    ], style={"marginBottom": "8px"}),
+                                    html.Div([
+                                        html.Span("📉 BEARISH: ", style={"fontSize": "12px", "color": "#ff4444", "fontWeight": "600"}),
+                                        html.Span(f"{sentiments['BEARISH']}", style={"fontSize": "12px", "color": "var(--text-secondary)"})
+                                    ])
+                                ], style={
+                                    "background": "rgba(0, 0, 0, 0.2)",
+                                    "padding": "16px",
+                                    "borderRadius": "8px",
+                                    "display": "flex",
+                                    "flexDirection": "column"
+                                })
+                            ])
+                            
+                        ], style={"padding": "16px"})
+                    ]
+                
+                elif tab == 'raw':
                     # Show raw data with JSON
                     thoughts = []
                     for conv in conversations[-5:]:  # Last 5 conversations
@@ -1380,17 +1901,36 @@ class Dashboard:
                     # Show formatted conversation view
                     conversation_items = []
                     
-                    for conv in conversations[-5:]:  # Last 5 conversations
-                        # Parse timestamp to readable format
-                        timestamp_raw = conv.get('timestamp', '')
+                    # Helper function to get relative time
+                    def get_relative_time(timestamp_raw):
                         try:
                             if timestamp_raw:
                                 dt = datetime.fromisoformat(timestamp_raw.replace('Z', '+00:00'))
-                                timestamp = dt.strftime("%I:%M:%S %p")  # 12-hour format with AM/PM
-                            else:
-                                timestamp = datetime.now().strftime("%I:%M:%S %p")
+                                now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+                                diff = now - dt
+                                
+                                seconds = diff.total_seconds()
+                                if seconds < 60:
+                                    relative = f"{int(seconds)}s ago"
+                                elif seconds < 3600:
+                                    relative = f"{int(seconds/60)}m ago"
+                                elif seconds < 86400:
+                                    relative = f"{int(seconds/3600)}h ago"
+                                else:
+                                    relative = f"{int(seconds/86400)}d ago"
+                                
+                                absolute = dt.strftime("%I:%M:%S %p")  # 12-hour format with AM/PM
+                                date_str = dt.strftime("%b %d") if diff.total_seconds() >= 86400 else ""
+                                
+                                return relative, absolute, date_str
                         except:
-                            timestamp = timestamp_raw[:8] if len(timestamp_raw) > 8 else "N/A"
+                            pass
+                        return "N/A", "N/A", ""
+                    
+                    for conv in conversations:
+                        # Parse timestamp to readable format
+                        timestamp_raw = conv.get('timestamp', '')
+                        relative_time, absolute_time, date_str = get_relative_time(timestamp_raw)
                         
                         symbol = conv.get('symbol', 'Market')
                         
@@ -1429,31 +1969,65 @@ class Dashboard:
                         else:
                             decision_color = "#00ff88" if decision == "BUY" else "#ff4444" if decision == "SELL" else "#00aaff"
                         
-                        # Extract key insights from prompt
-                        prompt_summary = ""
+                        # Display actual prompt content (technical data)
+                        prompt_display = None
                         if 'prompt' in conv:
                             prompt = conv['prompt']
-                            # Check if it's market intelligence
-                            if "MARKET SCREENING" in prompt or "SECTOR ANALYSIS" in prompt:
-                                prompt_summary = "Analyzing market sectors, regime indicators, and risk factors for broad market intelligence."
-                            elif "RSI" in prompt or "price" in prompt or "trend" in prompt:
-                                prompt_summary = "Analyzing technical indicators and price action."
+                            
+                            # Show first 600 chars (enough to see key technical data)
+                            # with indication if there's more
+                            if len(prompt) <= 600:
+                                display_text = prompt
+                                more_indicator = ""
                             else:
-                                # Take first 100 chars as summary
-                                prompt_summary = prompt[:100] + "..." if len(prompt) > 100 else prompt
+                                display_text = prompt[:600]
+                                remaining = len(prompt) - 600
+                                more_indicator = f"\n\n... ({remaining} more characters - see Raw JSON tab for full prompt)"
+                            
+                            prompt_display = html.Div(
+                                display_text + more_indicator,
+                                style={
+                                    'whiteSpace': 'pre-wrap',
+                                    'fontFamily': 'JetBrains Mono, monospace',
+                                    'fontSize': '12px',
+                                    'color': 'var(--text-muted)',
+                                    'lineHeight': '1.6',
+                                    'padding': '10px',
+                                    'background': 'rgba(0,0,0,0.2)',
+                                    'borderRadius': '6px',
+                                    'border': '1px solid rgba(255,255,255,0.1)',
+                                    'maxHeight': '300px',
+                                    'overflowY': 'auto'
+                                }
+                            )
                         
                         conversation_items.append(
                             html.Div([
-                                # Timestamp header - cleaner format
+                                # Timestamp header - improved with relative and absolute time
                                 html.Div([
-                                    html.Span("🕐 ", style={"marginRight": "6px", "fontSize": "12px"}),
-                                    html.Span(timestamp, style={
-                                        "fontSize": "11px",
+                                    html.Div([
+                                        html.Span("🕐 ", style={"marginRight": "6px", "fontSize": "12px"}),
+                                        html.Span(relative_time, style={
+                                            "fontSize": "12px",
+                                            "fontWeight": "600",
+                                            "color": "#00aaff",
+                                            "marginRight": "8px"
+                                        }),
+                                        html.Span(f"({absolute_time})", style={
+                                            "fontSize": "10px",
+                                            "color": "var(--text-muted)",
+                                            "fontFamily": "JetBrains Mono"
+                                        })
+                                    ], style={"display": "flex", "alignItems": "center"}),
+                                    html.Span(date_str, style={
+                                        "fontSize": "10px",
                                         "color": "var(--text-muted)",
-                                        "fontFamily": "JetBrains Mono",
                                         "fontWeight": "500"
-                                    })
+                                    }) if date_str else None
                                 ], style={
+                                    "display": "flex",
+                                    "justifyContent": "space-between",
+                                    "alignItems": "center",
                                     "marginBottom": "10px",
                                     "paddingBottom": "6px",
                                     "borderBottom": "1px solid rgba(255, 255, 255, 0.05)"
@@ -1473,17 +2047,21 @@ class Dashboard:
                                             "fontSize": "12px",
                                             "color": "var(--text-secondary)",
                                             "marginLeft": "24px",
-                                            "marginBottom": "6px",
+                                            "marginBottom": "8px",
                                             "fontStyle": "italic",
                                             "lineHeight": "1.4"
                                         }
                                     ),
-                                    html.Div(prompt_summary, style={
-                                        "fontSize": "11px",
-                                        "color": "var(--text-muted)",
-                                        "marginLeft": "24px",
-                                        "lineHeight": "1.5"
-                                    }) if prompt_summary else None
+                                    # Show actual prompt content with technical data
+                                    html.Div([
+                                        html.Div("📊 Technical Context:", style={
+                                            "fontSize": "11px",
+                                            "fontWeight": "600",
+                                            "color": "#00aaff",
+                                            "marginBottom": "6px"
+                                        }),
+                                        prompt_display
+                                    ], style={"marginLeft": "24px"}) if prompt_display else None
                                 ], style={
                                     "background": "rgba(0, 170, 255, 0.08)",
                                     "borderLeft": "3px solid #00aaff",
@@ -1724,7 +2302,7 @@ class Dashboard:
         return fig
     
     def _get_llm_conversations(self):
-        """Get LLM conversations from log file"""
+        """Get LLM conversations from log file with better time management"""
         try:
             log_file = Path("logs/llm_conversations.jsonl")
             conversations = []
@@ -1733,11 +2311,17 @@ class Dashboard:
                 with open(log_file, 'r') as f:
                     for line in f:
                         try:
-                            conversations.append(json.loads(line))
+                            conv = json.loads(line)
+                            # Add timestamp if missing
+                            if 'timestamp' not in conv:
+                                conv['timestamp'] = datetime.now().isoformat()
+                            conversations.append(conv)
                         except:
                             continue
             
-            return conversations[-20:]  # Last 20 conversations
+            # Return more conversations for better filtering
+            # Get last 100 conversations (or all if less than 100)
+            return conversations[-100:] if len(conversations) > 100 else conversations
             
         except Exception as e:
             logger.error(f"Error reading conversations: {e}")

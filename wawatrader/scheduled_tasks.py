@@ -19,6 +19,12 @@ import json
 # Import timezone utilities for proper time handling
 from wawatrader.timezone_utils import now_market, format_market_time, format_local_time
 
+# Import news timeline manager for overnight news accumulation
+from wawatrader.news_timeline import get_timeline_manager
+
+# Import settings for configuration
+from config.settings import settings
+
 
 class ScheduledTaskHandlers:
     """
@@ -288,6 +294,63 @@ class ScheduledTaskHandlers:
         except Exception as e:
             logger.error(f"Daily summary failed: {e}")
             return {"status": "error", "task": "daily_summary", "error": str(e)}
+    
+    def start_news_collection(self) -> Dict[str, Any]:
+        """
+        Start overnight news collection (4:00 PM - market close).
+        
+        Builds dynamic trading universe and initializes NewsTimelineManager.
+        News will be collected every 30 minutes until 2:00 AM synthesis.
+        
+        Universe includes:
+        - Current positions (always tracked)
+        - Watchlist (user-configured)
+        - Sector leaders (diversification)
+        - High volume stocks (liquidity/opportunities)
+        - Recent movers (momentum/news-driven)
+        
+        Returns:
+            Initialization status
+        """
+        logger.info("📰 Starting overnight news collection...")
+        
+        try:
+            from wawatrader.universe_manager import get_universe_manager
+            
+            # Build dynamic trading universe
+            universe_mgr = get_universe_manager(self.alpaca, max_size=100)
+            
+            # Try to load from cache first (avoid rebuilding every 30 min)
+            symbols = universe_mgr.load_cache()
+            
+            if not symbols:
+                # Build fresh universe (positions + watchlist + discovered stocks)
+                watchlist = list(settings.data.symbols)
+                symbols = universe_mgr.build_universe(watchlist)
+            
+            logger.info(f"   🌍 Tracking {len(symbols)} symbols in dynamic universe")
+            
+            # Log priority breakdown
+            by_priority = universe_mgr.get_by_priority()
+            logger.info(f"      Priority 1 (Holdings): {len(by_priority[1])} stocks")
+            logger.info(f"      Priority 2 (Watchlist/Sectors): {len(by_priority[2])} stocks")
+            logger.info(f"      Priority 3 (Discovered): {len(by_priority[3])} stocks")
+            
+            # Initialize timeline manager
+            timeline_mgr = get_timeline_manager()
+            result = timeline_mgr.start_overnight_collection(symbols)
+            
+            logger.info(f"   ✅ Initialized: {result['initial_articles']} articles collected")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to start news collection: {e}")
+            return {
+                "status": "error",
+                "task": "start_news_collection",
+                "error": str(e)
+            }
     
     def evening_deep_learning(self) -> Dict[str, Any]:
         """
@@ -1167,26 +1230,48 @@ Respond in JSON format:
     
     def news_monitor(self) -> Dict[str, Any]:
         """
-        Monitor for breaking news (every 2 hours overnight).
+        Monitor for breaking news (every 30 minutes overnight).
         
-        Checks:
-        - Major breaking news
-        - Economic announcements
-        - Futures movements >2%
+        ACCUMULATION PHASE: Collect news without making decisions.
+        The complete narrative will be synthesized at 2:00 AM.
+        
+        Strategy:
+        - 4:00 PM - 2:00 AM: Just accumulate news (this method)
+        - 2:00 AM: Synthesize complete narrative (overnight_summary)
+        - 6:00 AM: Validate with late-breaking news
         
         Returns:
-            News alerts
+            News collection status
         """
-        logger.debug("💤 Checking for breaking news...")
+        logger.debug("� Collecting overnight news...")
         
-        # Placeholder - would integrate with news API
-        # Keep logging minimal during sleep mode
-        
-        return {
-            "status": "success",
-            "task": "news_monitor",
-            "alerts": []
-        }
+        try:
+            timeline_mgr = get_timeline_manager()
+            
+            # Collect news for all tracked symbols
+            new_articles = timeline_mgr.collect_news()
+            
+            if new_articles > 0:
+                logger.info(f"✅ Collected {new_articles} new articles")
+            
+            # Get statistics
+            stats = timeline_mgr.get_statistics()
+            
+            return {
+                "status": "success",
+                "task": "news_monitor",
+                "new_articles": new_articles,
+                "total_articles": stats['total_articles'],
+                "symbols_with_news": stats['symbols_with_news']
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error in news monitoring: {e}")
+            return {
+                "status": "error",
+                "task": "news_monitor",
+                "error": str(e)
+            }
     
     # =================================================================
     # PRE-MARKET PREP TASKS (6:00 AM - 9:30 AM)

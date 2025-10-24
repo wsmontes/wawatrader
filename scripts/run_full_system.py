@@ -72,45 +72,62 @@ class SystemOrchestrator:
         logger.info("🤖 Checking LM Studio...")
         
         try:
-            from wawatrader.llm_bridge import LLMBridge
+            # Direct API test without full LLMBridge initialization
+            import requests
             
-            # Try to initialize LLM bridge
-            bridge = LLMBridge()
+            lm_studio_url = "http://localhost:1234/v1/chat/completions"
             
-            # Try a simple health check
-            try:
-                # Simple test query without extra parameters
-                response = bridge.query_llm("Respond with just 'OK'")
-                
-                if response and 'OK' in response.upper():
+            test_payload = {
+                "model": "google/gemma-3-4b",
+                "messages": [{"role": "user", "content": "Respond with just: OK"}],
+                "temperature": 0.1,
+                "max_tokens": 10
+            }
+            
+            logger.debug("Testing LM Studio API...")
+            response = requests.post(lm_studio_url, json=test_payload, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'choices' in data and len(data['choices']) > 0:
+                    content = data['choices'][0]['message']['content']
                     logger.success("✅ LM Studio: Connected and responding")
+                    logger.debug(f"   Test response: {content}")
                     return {
                         'available': True,
                         'responding': True,
                         'message': 'LM Studio connected and model responding'
                     }
-                else:
-                    logger.warning("⚠️  LM Studio: Connected but model not responding correctly")
-                    return {
-                        'available': True,
-                        'responding': False,
-                        'message': 'LM Studio connected but model may need loading'
-                    }
+            
+            logger.warning("⚠️  LM Studio: Unexpected response format")
+            return {
+                'available': True,
+                'responding': False,
+                'message': 'LM Studio connected but response format unexpected'
+            }
                     
-            except Exception as e:
-                logger.warning(f"⚠️  LM Studio: Connected but model test failed: {e}")
-                return {
-                    'available': True,
-                    'responding': False,
-                    'message': 'LM Studio running but model may need to be loaded manually'
-                }
-                
-        except Exception as e:
-            logger.error(f"❌ LM Studio: Not available - {e}")
+        except requests.exceptions.ConnectionError:
+            logger.warning("⚠️  LM Studio: Cannot connect to http://localhost:1234")
+            logger.info("   💡 Start LM Studio server and load a model")
             return {
                 'available': False,
                 'responding': False,
-                'message': f'LM Studio not available: {e}'
+                'message': 'Cannot connect to LM Studio - start the server'
+            }
+        except requests.exceptions.Timeout:
+            logger.warning("⚠️  LM Studio: Connection timeout")
+            logger.info("   💡 LM Studio may be busy or model not loaded")
+            return {
+                'available': True,
+                'responding': False,
+                'message': 'LM Studio timeout - check if model is loaded'
+            }
+        except Exception as e:
+            logger.error(f"❌ LM Studio check failed: {type(e).__name__}: {str(e)}")
+            return {
+                'available': False,
+                'responding': False,
+                'message': f'LM Studio check failed: {str(e)}'
             }
     
     def check_alpaca(self) -> Dict[str, Any]:
@@ -210,6 +227,85 @@ class SystemOrchestrator:
         print("   🛑 Stop: Press Ctrl+C")
         print()
     
+    def start_active_trading(self):
+        """Run active trading during market hours"""
+        logger.info("💹 Starting active trading mode...")
+        
+        def trading_loop():
+            """Background thread for active trading"""
+            import time
+            import json
+            from wawatrader.trading_agent import TradingAgent
+            
+            # Get actively traded stocks from Alpaca (dynamic watchlist)
+            alpaca = get_client()
+            try:
+                watchlist = alpaca.get_active_stocks(limit=50)  # Get top 50 liquid stocks
+                logger.info(f"📋 Dynamic watchlist loaded: {len(watchlist)} stocks")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to get dynamic watchlist: {e}")
+                # Fallback to a curated list of highly liquid stocks
+                watchlist = [
+                    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'BRK.B',
+                    'JPM', 'JNJ', 'V', 'PG', 'MA', 'HD', 'UNH', 'DIS', 'BAC', 'XOM',
+                    'CSCO', 'ADBE', 'NFLX', 'PFE', 'KO', 'PEP', 'TMO', 'ABBV', 'COST',
+                    'MRK', 'AVGO', 'WMT', 'CRM', 'ACN', 'TXN', 'MDT', 'LLY', 'NKE',
+                    'DHR', 'NEE', 'ORCL', 'CVX', 'BMY', 'UPS', 'QCOM', 'PM', 'T',
+                    'HON', 'IBM', 'AMT', 'SBUX', 'INTU', 'LOW', 'AMD', 'AMAT', 'GE'
+                ]
+                logger.info(f"📋 Using fallback watchlist: {len(watchlist)} stocks")
+            
+            # Load overnight analysis if available
+            overnight_analysis = []
+            overnight_file = PROJECT_ROOT / "logs" / "overnight_analysis.json"
+            if overnight_file.exists():
+                try:
+                    with open(overnight_file, 'r') as f:
+                        overnight_analysis = json.load(f)
+                    logger.info(f"🌙 Loaded overnight analysis: {len(overnight_analysis)} stocks analyzed")
+                    
+                    # Log high-confidence recommendations
+                    sell_recs = [a for a in overnight_analysis if a.get('final_recommendation') == 'SELL']
+                    if sell_recs:
+                        logger.info(f"⚠️  Overnight SELL recommendations: {len(sell_recs)} stocks")
+                        for rec in sell_recs[:5]:  # Show first 5
+                            logger.info(f"   • {rec['symbol']}: {rec.get('reasoning', 'N/A')[:80]}...")
+                except Exception as e:
+                    logger.warning(f"⚠️  Failed to load overnight analysis: {e}")
+            else:
+                logger.info("ℹ️  No overnight analysis available (file not found)")
+            
+            agent = TradingAgent(symbols=watchlist, dry_run=False, overnight_analysis=overnight_analysis)
+            
+            logger.info(f"🎯 Trading agent initialized")
+            logger.info(f"   Watchlist: {', '.join(watchlist[:10])}{'...' if len(watchlist) > 10 else ''}")
+            logger.info("⏰ Trading cycles run every 5 minutes during market hours")
+            
+            while not self.shutdown_requested:
+                try:
+                    # Check if market is open
+                    market_status = alpaca.get_market_status()
+                    
+                    if market_status.get('is_open', False):
+                        logger.info("📊 Running trading cycle...")
+                        agent.run_cycle()
+                        logger.success("✅ Trading cycle complete")
+                        
+                        # Wait 5 minutes before next cycle
+                        time.sleep(300)
+                    else:
+                        logger.info("⏰ Market closed - waiting 60 seconds before recheck")
+                        time.sleep(60)
+                        
+                except Exception as e:
+                    logger.error(f"❌ Trading loop error: {e}")
+                    time.sleep(60)  # Wait 1 minute on error
+        
+        # Start trading in background thread
+        trading_thread = threading.Thread(target=trading_loop, daemon=True)
+        trading_thread.start()
+        logger.success("✅ Active trading mode enabled")
+    
     def start_market_closed_planning(self):
         """Run intelligent market-closed activities in background"""
         logger.info("📋 Starting market-closed planning mode...")
@@ -217,20 +313,32 @@ class SystemOrchestrator:
         def planning_loop():
             """Background thread for market-closed intelligence"""
             import time
+            import pandas as pd
+            import json
+            
+            # Import dependencies at the start of the loop
+            from wawatrader.llm_bridge import LLMBridge
+            from wawatrader.alpaca_client import get_client
+            from wawatrader.indicators import TechnicalIndicators
+            from wawatrader.iterative_analyst import IterativeAnalyst
             
             while not self.shutdown_requested:
                 try:
                     logger.info("🧠 Running market analysis and planning...")
                     
-                    # 1. Analyze watchlist stocks
-                    watchlist = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA']
-                    
-                    from wawatrader.llm_bridge import LLMBridge
-                    from wawatrader.alpaca_client import get_client
-                    from wawatrader.indicators import TechnicalIndicators
-                    from wawatrader.iterative_analyst import IterativeAnalyst
-                    import pandas as pd
-                    import json
+                    # Get dynamic watchlist (same as trading mode)
+                    alpaca_client = get_client()
+                    try:
+                        watchlist = alpaca_client.get_active_stocks(limit=50)
+                        logger.info(f"📋 Planning watchlist: {len(watchlist)} stocks")
+                    except Exception as e:
+                        watchlist = [
+                            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'BRK.B',
+                            'JPM', 'JNJ', 'V', 'PG', 'MA', 'HD', 'UNH', 'DIS', 'BAC', 'XOM',
+                            'CSCO', 'ADBE', 'NFLX', 'PFE', 'KO', 'PEP', 'TMO', 'ABBV', 'COST',
+                            'MRK', 'AVGO', 'WMT', 'CRM', 'ACN', 'TXN', 'MDT', 'LLY', 'NKE'
+                        ]
+                        logger.info(f"📋 Using fallback watchlist: {len(watchlist)} stocks")
                     
                     bridge = LLMBridge()
                     client = get_client()
@@ -353,11 +461,21 @@ class SystemOrchestrator:
         # Step 3: Print system status
         self.print_system_status(lm_studio_status, alpaca_status)
         
-        # Step 4: Start market-closed planning if market is closed and LLM available
-        if not alpaca_status['market_open'] and lm_studio_status['responding']:
+        # Step 4A: Start active trading if market is open
+        if alpaca_status['market_open']:
+            logger.info("")
+            logger.info("🟢 Market is OPEN - activating trading mode")
+            logger.info("   💹 Trading cycles run every 5 minutes")
+            logger.info("   📊 Dynamic watchlist: Up to 50 actively traded stocks")
+            logger.info("   🔄 Dashboard updates in real-time")
+            logger.info("")
+            self.start_active_trading()
+        
+        # Step 4B: Start market-closed planning if market is closed and LLM available
+        elif not alpaca_status['market_open'] and lm_studio_status['responding']:
             logger.info("")
             logger.info("🌙 Market is closed - activating intelligent planning mode")
-            logger.info("   📊 Analyzing watchlist stocks")
+            logger.info("   📊 Analyzing dynamic watchlist")
             logger.info("   🧠 Preparing strategies for market open")
             logger.info("   ⏰ Analyses run every 30 minutes")
             logger.info("")

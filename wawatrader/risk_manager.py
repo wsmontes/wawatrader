@@ -153,6 +153,9 @@ class RiskManager:
         """
         Check total portfolio exposure.
         
+        This checks if we're over-leveraged or concentrated, NOT if we're fully invested.
+        A healthy portfolio should be 80-100% invested (exposure ratio 0.8-1.0).
+        
         Args:
             positions: List of current positions
             account_value: Total account value
@@ -160,32 +163,46 @@ class RiskManager:
         Returns:
             RiskCheckResult with approval
         """
-        # Calculate total market exposure
+        # Calculate total market exposure (sum of position values)
         total_exposure = sum(
             abs(float(pos.get('market_value', 0)))
             for pos in positions
         )
         
-        exposure_pct = total_exposure / account_value
+        # Exposure ratio: 1.0 = fully invested, >1.0 = leveraged
+        exposure_ratio = total_exposure / account_value if account_value > 0 else 0
         
         warnings = []
         
-        # Check if exposure exceeds limit
-        if exposure_pct > self.max_portfolio_risk:
+        # REALISTIC LIMITS:
+        # - < 1.0 = Normal (fully invested or less)
+        # - > 1.0 = Leveraged (using margin)
+        # - > 1.5 = Dangerous leverage
+        
+        max_leverage = 1.5  # Allow up to 150% leverage (using margin)
+        
+        # Check if we're over-leveraged
+        if exposure_ratio > max_leverage:
             return RiskCheckResult(
                 approved=False,
-                reason=f"Portfolio exposure too high: ${total_exposure:,.2f} ({exposure_pct*100:.1f}%) exceeds max {self.max_portfolio_risk*100:.1f}%"
+                reason=f"Excessive leverage: ${total_exposure:,.2f} ({exposure_ratio*100:.1f}%) exceeds max {max_leverage*100:.1f}%"
             )
         
-        # Warning if exposure is high (>85%)
-        if exposure_pct > self.max_portfolio_risk * 0.85:
+        # Warning if using significant leverage (>110%)
+        if exposure_ratio > 1.10:
             warnings.append(
-                f"Portfolio exposure at {exposure_pct*100:.1f}% (close to {self.max_portfolio_risk*100:.1f}% limit)"
+                f"⚠️ Using margin: {exposure_ratio*100:.1f}% exposure (above 100%)"
+            )
+        
+        # Info if under-invested (<70%)
+        if exposure_ratio < 0.70:
+            warnings.append(
+                f"📊 Under-invested: {exposure_ratio*100:.1f}% exposure (consider deploying more capital)"
             )
         
         return RiskCheckResult(
             approved=True,
-            reason=f"Portfolio exposure OK: ${total_exposure:,.2f} ({exposure_pct*100:.1f}%)",
+            reason=f"Portfolio exposure OK: ${total_exposure:,.2f} ({exposure_ratio*100:.1f}% of portfolio)",
             warnings=warnings
         )
     
@@ -234,7 +251,8 @@ class RiskManager:
         price: float,
         account_value: float,
         current_pnl: float,
-        positions: List[Dict[str, Any]]
+        positions: List[Dict[str, Any]],
+        buying_power: float = None  # NEW: Optional buying power parameter
     ) -> RiskCheckResult:
         """
         Comprehensive trade validation (runs all checks).
@@ -247,6 +265,7 @@ class RiskManager:
             account_value: Total account value
             current_pnl: Today's P&L
             positions: Current positions
+            buying_power: Available buying power (optional, for BUY orders)
         
         Returns:
             RiskCheckResult (approved only if ALL checks pass)
@@ -254,6 +273,31 @@ class RiskManager:
         logger.info(f"Validating trade: {action.upper()} {shares} {symbol} @ ${price:.2f}")
         
         all_warnings = []
+        
+        # Check 0: Buying power (CRITICAL for BUY orders)
+        if action.lower() == 'buy':
+            trade_cost = shares * price
+            
+            # If buying_power provided, check it
+            if buying_power is not None:
+                if trade_cost > buying_power:
+                    max_affordable_shares = int(buying_power / price)
+                    logger.warning(f"❌ Insufficient buying power: Need ${trade_cost:,.2f}, have ${buying_power:,.2f}")
+                    
+                    # If we can't afford ANY shares, reject immediately
+                    if max_affordable_shares < 1:
+                        return RiskCheckResult(
+                            approved=False,
+                            reason=f"Insufficient buying power: ${buying_power:,.2f} available, ${trade_cost:,.2f} required",
+                            max_shares=0
+                        )
+                    
+                    # Otherwise, suggest reducing to affordable amount
+                    return RiskCheckResult(
+                        approved=False,
+                        reason=f"Insufficient buying power: Can afford {max_affordable_shares} shares (${max_affordable_shares * price:,.2f}), not {shares} shares (${trade_cost:,.2f})",
+                        max_shares=max_affordable_shares
+                    )
         
         # Check 1: Position size
         if action.lower() == 'buy':
@@ -271,11 +315,20 @@ class RiskManager:
         all_warnings.extend(loss_check.warnings)
         
         # Check 3: Portfolio exposure
-        exposure_check = self.check_portfolio_exposure(positions, account_value)
-        if not exposure_check.approved:
-            logger.warning(f"❌ Portfolio exposure check failed: {exposure_check.reason}")
-            return exposure_check
-        all_warnings.extend(exposure_check.warnings)
+        # IMPORTANT: Skip for SELL actions - we WANT to sell when over-leveraged!
+        if action.lower() == 'buy':
+            exposure_check = self.check_portfolio_exposure(positions, account_value)
+            if not exposure_check.approved:
+                logger.warning(f"❌ Portfolio exposure check failed: {exposure_check.reason}")
+                return exposure_check
+            all_warnings.extend(exposure_check.warnings)
+        elif action.lower() == 'sell':
+            # For SELL, exposure check is advisory only (still log warnings)
+            exposure_check = self.check_portfolio_exposure(positions, account_value)
+            if not exposure_check.approved:
+                # If over-leveraged, SELLING is actually GOOD - log as info, not error
+                logger.info(f"✅ SELL approved despite high leverage (this will help reduce exposure)")
+            all_warnings.extend(exposure_check.warnings)
         
         # Check 4: Trade frequency
         freq_check = self.check_trade_frequency(symbol, action)

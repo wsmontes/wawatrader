@@ -42,13 +42,14 @@ class LMStudioConfig(BaseModel):
     max_tokens: int = Field(default=-1)
     timeout: int = Field(default=30, ge=5, le=120)
     trading_profile: str = Field(default="moderate", pattern="^(conservative|moderate|aggressive|maximum)$")
+    use_modular_prompts: bool = Field(default=True)  # NEW: Enable modular prompt system
 
 
 class RiskConfig(BaseModel):
     """Risk Management Configuration"""
-    max_position_size: float = Field(default=0.10, ge=0.01, le=0.50)
-    max_daily_loss: float = Field(default=0.02, ge=0.01, le=0.10)
-    max_portfolio_risk: float = Field(default=0.30, ge=0.10, le=0.80)
+    max_position_size: float = Field(default=0.10, ge=0.01, le=0.50)  # Max 10% per position
+    max_daily_loss: float = Field(default=0.02, ge=0.01, le=0.10)     # Max 2% daily loss
+    max_portfolio_risk: float = Field(default=1.50, ge=1.0, le=2.0)   # Max 150% leverage (DEPRECATED - use max_leverage)
 
 
 class TradingConfig(BaseModel):
@@ -86,6 +87,10 @@ class SystemConfig(BaseModel):
     market_open_minute: int = Field(default=30, ge=0, le=59)
     market_close_hour: int = Field(default=16, ge=0, le=23)
     market_close_minute: int = Field(default=0, ge=0, le=59)
+    
+    # Dynamic Universe Configuration
+    universe_size: int = Field(default=100, ge=10, le=500, description="Number of stocks to track for news")
+    universe_cache_hours: int = Field(default=24, ge=1, le=168, description="Hours to cache universe")
 
 
 class Settings:
@@ -124,7 +129,7 @@ class Settings:
         self.risk = RiskConfig(
             max_position_size=float(os.getenv('MAX_POSITION_SIZE', '0.10')),
             max_daily_loss=float(os.getenv('MAX_DAILY_LOSS', '0.02')),
-            max_portfolio_risk=float(os.getenv('MAX_PORTFOLIO_RISK', '0.30'))
+            max_portfolio_risk=float(os.getenv('MAX_PORTFOLIO_RISK', '1.50'))
         )
         
         self.trading = TradingConfig(

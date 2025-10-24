@@ -166,4 +166,4 @@ class TestComponent:
 
 ---
 
-**Remember**: WawaTrader prioritizes safety and testing. When in doubt, check the existing documentation in `docs/` or follow established patterns in the codebase.
+**Remember**: WawaTrader prioritizes safety and testing. When in doubt, check the existing documentation in `docs/` or follow established patterns in the codebase. For each python file run, ensure that the venv is activated.
