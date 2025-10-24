@@ -38,9 +38,9 @@ VENV_PATHS = [
 # Available commands and their descriptions
 COMMANDS = {
     'full': {
-        'script': 'scripts/run_trading.py',
-        'description': 'Start complete system (trading + dashboard)',
-        'help': 'Runs trading agent with integrated dashboard'
+        'script': 'scripts/run_full_system.py',
+        'description': 'Start complete system with full orchestration',
+        'help': 'Checks all components, starts dashboard with health monitoring'
     },
     'dashboard': {
         'script': 'scripts/run_dashboard.py',
@@ -275,15 +275,15 @@ def main():
     
     # Parse arguments
     if len(sys.argv) == 1:
-        # No arguments - start full system (trading + dashboard)
-        print("🚀 Starting WawaTrader Full System (trading + dashboard)")
+        # No arguments - start full orchestrated system
+        print("🚀 Starting WawaTrader Full System")
+        print("   ✓ Checking LM Studio connection and model status")
+        print("   ✓ Verifying Alpaca API connection")
+        print("   ✓ Starting real-time dashboard with monitoring")
+        print()
         print("   Use 'python start.py menu' to see all options")
         print("   Use 'python start.py help' for detailed help")
-        print("   Dashboard: http://localhost:8050")
-        print("   Note: Dashboard may show warnings (safe to ignore)")
-        
-        # Show market status for trading commands
-        display_market_status()
+        print()
         
         cmd = 'full'
         args = []

@@ -75,6 +75,13 @@ class SystemConfig(BaseModel):
     cache_enabled: bool = Field(default=True)
     cache_ttl: int = Field(default=300)  # 5 minutes
     
+    # Timezone Configuration
+    # Local timezone where the system is running (e.g., "America/Los_Angeles" for Pacific)
+    local_timezone: str = Field(default="America/Los_Angeles")
+    # Market timezone (NYSE/NASDAQ operates on Eastern Time)
+    market_timezone: str = Field(default="America/New_York")
+    
+    # Market hours in ET (these are used for reference, actual detection uses Alpaca API)
     market_open_hour: int = Field(default=9, ge=0, le=23)
     market_open_minute: int = Field(default=30, ge=0, le=59)
     market_close_hour: int = Field(default=16, ge=0, le=23)
@@ -132,6 +139,8 @@ class Settings:
             log_file=os.getenv('LOG_FILE', 'logs/wawatrader.log'),
             cache_enabled=os.getenv('CACHE_ENABLED', 'true').lower() == 'true',
             cache_ttl=int(os.getenv('CACHE_TTL', '300')),
+            local_timezone=os.getenv('LOCAL_TIMEZONE', 'America/Los_Angeles'),
+            market_timezone=os.getenv('MARKET_TIMEZONE', 'America/New_York'),
             market_open_hour=int(os.getenv('MARKET_OPEN_HOUR', '9')),
             market_open_minute=int(os.getenv('MARKET_OPEN_MINUTE', '30')),
             market_close_hour=int(os.getenv('MARKET_CLOSE_HOUR', '16')),

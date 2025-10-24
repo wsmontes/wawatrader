@@ -10,8 +10,9 @@ pandas>=2.0.0
 numpy>=1.24.0
 scipy>=1.10.0
 
-# LLM Integration (for LM Studio via OpenAI-compatible API)
-openai>=1.0.0
+# LLM Integration
+lmstudio>=1.5.0  # Official LM Studio Python SDK
+openai>=1.0.0    # OpenAI-compatible API (fallback)
 
 # Configuration Management
 python-dotenv>=1.0.0

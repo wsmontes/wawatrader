@@ -26,6 +26,7 @@ from wawatrader.indicators import analyze_dataframe, get_latest_signals
 from wawatrader.llm_bridge import LLMBridge
 from wawatrader.risk_manager import get_risk_manager
 from wawatrader.market_intelligence import get_intelligence_engine
+from wawatrader.learning_engine import LearningEngine
 from config.settings import settings
 
 
@@ -81,12 +82,14 @@ class TradingAgent:
         self.llm_bridge = LLMBridge()
         self.risk_manager = get_risk_manager()
         self.intelligence_engine = get_intelligence_engine()
+        self.learning_engine = LearningEngine(self.alpaca)
         
         # State tracking
         self.decisions: List[TradingDecision] = []
         self.positions: Dict[str, Any] = {}
         self.account_value: float = 0
         self.current_pnl: float = 0
+        self.active_decision_ids: Dict[str, str] = {}  # symbol -> decision_id for tracking outcomes
         
         # Configuration
         self.min_confidence = settings.trading.min_confidence
@@ -327,6 +330,26 @@ class TradingAgent:
         else:
             logger.info(f"✅ {symbol}: {action.upper()} {shares} shares @ ${price:.2f} (confidence: {confidence}%)")
         
+        # NEW: Record decision in learning engine (for learning and pattern discovery)
+        try:
+            if action != 'hold' and decision.risk_approved:
+                decision_id = self.learning_engine.record_decision(
+                    symbol=symbol,
+                    action=action,
+                    price=price,
+                    shares=shares,
+                    technical_indicators=signals,
+                    llm_analysis=llm,
+                    decision_confidence=confidence / 100.0,  # Convert to 0-1
+                    decision_reasoning=reasoning,
+                    pattern_matched=None  # Will be set if pattern matching is added
+                )
+                # Track this decision ID for outcome recording later
+                self.active_decision_ids[symbol] = decision_id
+                logger.debug(f"💾 Decision recorded in learning engine: {decision_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to record decision in learning engine: {e}")
+        
         return decision
     
     def _calculate_position_size(self, symbol: str, price: float, action: str) -> int:
@@ -431,6 +454,82 @@ class TradingAgent:
             logger.error(f"Failed to execute trade: {e}")
             decision.executed = False
             decision.execution_error = str(e)
+    
+    def record_trade_outcome(self, symbol: str):
+        """
+        Record the outcome of a trade when position is closed.
+        
+        This enables the learning engine to learn from actual results.
+        
+        Args:
+            symbol: Symbol of closed position
+        """
+        try:
+            # Check if we have a tracked decision for this symbol
+            if symbol not in self.active_decision_ids:
+                return
+            
+            decision_id = self.active_decision_ids[symbol]
+            
+            # Get historical decisions to find entry details
+            recent_decisions = self.learning_engine.memory.get_recent_decisions(days=7, symbol=symbol)
+            decision_row = recent_decisions[recent_decisions['id'] == decision_id]
+            
+            if decision_row.empty:
+                logger.warning(f"⚠️ Could not find decision {decision_id} to record outcome")
+                return
+            
+            entry_price = decision_row['price'].iloc[0]
+            entry_action = decision_row['action'].iloc[0]
+            
+            # Get current price (exit price)
+            bars = self.alpaca.get_bars(symbol, "1Day", limit=1)
+            if bars.empty:
+                logger.warning(f"⚠️ Could not get current price for {symbol}")
+                return
+            
+            exit_price = bars['close'].iloc[-1]
+            exit_time = datetime.now()
+            
+            # Calculate P&L
+            if entry_action == 'buy':
+                profit_loss = (exit_price - entry_price) * decision_row['shares'].iloc[0]
+            else:  # sell
+                profit_loss = (entry_price - exit_price) * decision_row['shares'].iloc[0]
+            
+            # Determine outcome
+            if profit_loss > 5:
+                outcome = "win"
+            elif profit_loss < -5:
+                outcome = "loss"
+            else:
+                outcome = "neutral"
+            
+            # Generate lesson
+            if outcome == "win":
+                lesson = f"Profitable trade on {symbol}: {entry_action} @ ${entry_price:.2f}, exit @ ${exit_price:.2f}"
+            elif outcome == "loss":
+                lesson = f"Loss on {symbol}: {entry_action} @ ${entry_price:.2f}, exit @ ${exit_price:.2f}. Review decision reasoning."
+            else:
+                lesson = None
+            
+            # Record outcome in learning engine
+            self.learning_engine.record_outcome(
+                decision_id=decision_id,
+                outcome=outcome,
+                profit_loss=profit_loss,
+                exit_price=exit_price,
+                exit_time=exit_time,
+                lesson_learned=lesson
+            )
+            
+            # Remove from active tracking
+            del self.active_decision_ids[symbol]
+            
+            logger.info(f"📊 Trade outcome recorded: {symbol} {outcome} (${profit_loss:+.2f})")
+            
+        except Exception as e:
+            logger.error(f"❌ Error recording trade outcome: {e}")
     
     def log_decision(self, decision: TradingDecision):
         """

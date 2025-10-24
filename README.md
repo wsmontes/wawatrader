@@ -151,8 +151,12 @@ export ALPACA_PAPER=true
 2. **Set up LM Studio:**
 ```bash
 export LM_STUDIO_BASE_URL="http://localhost:1234/v1"
-export LM_STUDIO_MODEL="gemma-3-4b"
+export LM_STUDIO_MODEL="google/gemma-3-4b"
 ```
+
+> 💡 **NEW**: WawaTrader now supports the [official LM Studio Python SDK](https://lmstudio.ai/docs/python) for automatic model loading and better integration!  
+> Install with: `pip install lmstudio`  
+> See [`docs/LM_STUDIO_SDK_UPGRADE.md`](docs/LM_STUDIO_SDK_UPGRADE.md) for details.
 
 3. **Optional: Configure alerts:**
 ```bash

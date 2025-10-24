@@ -162,6 +162,14 @@ class IntelligentScheduler:
             market_states=[MarketState.MARKET_CLOSING],
         ))
         
+        # NEW: Evening Learning Task (runs at 5 PM to allow time after daily_summary)
+        self.register_task(ScheduledTask(
+            name="evening_deep_learning",
+            description="Deep learning: analyze performance, discover patterns, optimize strategies",
+            scheduled_hours=[17],  # 5 PM (after daily summary completes)
+            market_states=[MarketState.EVENING_ANALYSIS],
+        ))
+        
         # Evening Analysis Tasks
         self.register_task(ScheduledTask(
             name="earnings_analysis",

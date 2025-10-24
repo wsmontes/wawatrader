@@ -93,8 +93,10 @@ class Dashboard:
                 "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap",
                 "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
             ],
-            title="WawaTrader Beta",
-            meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}]
+            title="WawaTrader Pro v2.0",  # Changed title to force client refresh
+            meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
+            suppress_callback_exceptions=True,  # Fix for multi-output callback registration
+            update_title=None  # Disable title updates to avoid callback conflicts
         )
         
         # Add custom CSS
@@ -1076,66 +1078,79 @@ class Dashboard:
     def _register_professional_callbacks(self):
         """Register callbacks for professional dashboard"""
         
+        # Split into separate callbacks to avoid Dash multi-output bug
         @self.app.callback(
-            [Output('system-time', 'children'),
-             Output('market-status', 'children'),
-             Output('market-status', 'style'),
-             Output('market-state', 'children'),
-             Output('market-state', 'style'),
-             Output('pnl-header', 'children'),
-             Output('pnl-header', 'style')],
+            Output('system-time', 'children'),
             [Input('main-interval', 'n_intervals')]
         )
-        def update_header(n):
-            """Update header with time, market status, and P&L"""
-            current_time = datetime.now().strftime("%H:%M:%S")
-            
-            # Get market status
+        def update_system_time(n):
+            """Update system time"""
+            return datetime.now().strftime("%H:%M:%S")
+        
+        @self.app.callback(
+            [Output('market-status', 'children'),
+             Output('market-status', 'style')],
+            [Input('main-interval', 'n_intervals')]
+        )
+        def update_market_status(n):
+            """Update market status"""
             try:
                 market_status = self.alpaca.get_market_status()
                 is_open = market_status.get('is_open', False)
                 status_text = market_status.get('status_text', '⚠️ UNKNOWN')
-                time_info = market_status.get('time_until', '')
                 
-                # Import market state detector
-                try:
-                    from wawatrader.market_state import get_market_state
-                    market_state = get_market_state(self.alpaca)
-                    state_display = f"{market_state.emoji} {market_state.description}"
-                    state_style = {
-                        "background": "var(--bg-tertiary)",
-                        "color": "var(--text-secondary)",
-                        "fontSize": "11px"
+                if is_open:
+                    market_status_style = {
+                        "background": "var(--accent-green)",
+                        "color": "white",
+                        "fontWeight": "600",
+                        "animation": "pulse 2s ease-in-out infinite"
                     }
-                except Exception as e:
-                    logger.debug(f"Market state not available: {e}")
-                    state_display = ""
-                    state_style = {"display": "none"}
+                else:
+                    market_status_style = {
+                        "background": "var(--accent-red)",
+                        "color": "white",
+                        "fontWeight": "600"
+                    }
+                
+                return status_text, market_status_style
                 
             except Exception as e:
                 logger.error(f"Error getting market status: {e}")
-                status_text = "⚠️ UNKNOWN"
-                is_open = False
-                time_info = ""
-                state_display = ""
-                state_style = {"display": "none"}
-            
-            # Style market status based on open/closed
-            if is_open:
-                market_status_style = {
-                    "background": "var(--accent-green)",
-                    "color": "white",
-                    "fontWeight": "600",
-                    "animation": "pulse 2s ease-in-out infinite"
-                }
-            else:
-                market_status_style = {
+                return "⚠️ UNKNOWN", {
                     "background": "var(--accent-red)",
                     "color": "white",
                     "fontWeight": "600"
                 }
-            
-            # Get P&L
+        
+        @self.app.callback(
+            [Output('market-state', 'children'),
+             Output('market-state', 'style')],
+            [Input('main-interval', 'n_intervals')]
+        )
+        def update_market_state(n):
+            """Update market state"""
+            try:
+                from wawatrader.market_state import get_market_state
+                market_state = get_market_state(self.alpaca)
+                state_display = f"{market_state.emoji} {market_state.description}"
+                state_style = {
+                    "background": "var(--bg-tertiary)",
+                    "color": "var(--text-secondary)",
+                    "fontSize": "11px"
+                }
+                return state_display, state_style
+            except Exception as e:
+                logger.debug(f"Market state not available: {e}")
+                return "", {"display": "none"}
+        
+        @self.app.callback(
+            [Output('pnl-header', 'children'),
+             Output('pnl-header', 'style')],
+            [Input('main-interval', 'n_intervals')]
+        )
+        def update_pnl_header(n):
+            """Update P&L header"""
             try:
                 # Get account info
                 account = self.alpaca.get_account()
@@ -1144,11 +1159,9 @@ class Dashboard:
                 if isinstance(account, dict):
                     equity = float(account.get('equity', 0))
                     last_equity = float(account.get('last_equity', equity))
-                    buying_power = float(account.get('buying_power', 0))
                 else:
                     equity = float(account.equity)
                     last_equity = float(account.last_equity)
-                    buying_power = float(account.buying_power)
                 
                 pnl = equity - last_equity
                 pnl_pct = (pnl / last_equity) * 100 if last_equity > 0 else 0
@@ -1163,12 +1176,11 @@ class Dashboard:
                     "fontWeight": "bold"
                 }
                 
+                return pnl_text, pnl_style
+                
             except Exception as e:
                 logger.error(f"Error updating P&L: {e}")
-                pnl_text = "P&L: --"
-                pnl_style = {"background": "var(--bg-tertiary)", "color": "var(--text-muted)"}
-            
-            return current_time, status_text, market_status_style, state_display, state_style, pnl_text, pnl_style
+                return "P&L: --", {"background": "var(--bg-tertiary)", "color": "var(--text-muted)"}
         
         @self.app.callback(
             Output('main-chart', 'figure'),
