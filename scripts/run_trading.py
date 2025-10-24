@@ -62,6 +62,31 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     
     try:
+        # Step 0: Check market status first
+        print("📊 Checking market status...")
+        from wawatrader.alpaca_client import get_client
+        temp_client = get_client()
+        market_status = temp_client.get_market_status()
+        
+        print()
+        print("🕐 MARKET STATUS")
+        print("-" * 70)
+        print(f"   {market_status.get('status_text', '⚠️ UNKNOWN')}")
+        print(f"   {market_status.get('status_message', 'Unable to determine status')}")
+        print(f"   Trading Hours: {market_status.get('trading_hours', '9:30 AM - 4:00 PM ET')}")
+        
+        if not market_status.get('is_open', False):
+            print()
+            print("   💡 Note: Trading agent will start now and wait for market to open")
+            print("            The system will automatically begin trading when market opens")
+            print(f"            You can monitor progress on the dashboard")
+        else:
+            print()
+            print("   🟢 Market is OPEN - Trading will begin immediately!")
+        
+        print("-" * 70)
+        print()
+        
         # Step 1: Start Dashboard
         print("🖥️ Starting integrated dashboard...")
         dashboard_success = start_dashboard()
@@ -76,7 +101,7 @@ def main():
         print("=" * 70)
         print(f"📊 Trading Symbols: {', '.join(symbols)}")
         print(f"💰 Account Status: Paper Trading Account")
-        print(f"🔄 Trading Interval: 5 minutes")
+        print(f"🧠 Scheduling: Intelligent & Adaptive")
         print(f"⚡ Mode: LIVE PAPER TRADING")
         if dashboard_success:
             print(f"📈 Dashboard: http://127.0.0.1:8050")
@@ -95,19 +120,36 @@ def main():
         print("  ✅ Technical analysis (21+ indicators)")
         print("  ✅ LLM sentiment analysis (Gemma 3)")
         print("  ✅ Risk management (conservative)")
+        print("  ✅ Intelligent scheduling (70% resource reduction)")
         if dashboard_success:
             print("  ✅ Live dashboard (30s updates)")
         else:
             print("  ⚠️ Live dashboard (failed to start)")
         print("  ✅ Complete audit trail")
         print()
+        
+        # Market-specific guidance
+        if market_status.get('is_open', False):
+            print("🟢 Market is OPEN - Trading actively now!")
+            print("   - 5-min trading cycles")
+            print("   - 30-min quick intelligence checks")
+            print("   - 2-hour deep analysis")
+        else:
+            print("💤 Market is CLOSED - Adaptive mode active")
+            print(f"   Trading will begin automatically when market opens")
+            print("   - Minimal overnight monitoring")
+            print("   - Strategic pre-market prep (6-9:30 AM)")
+            print("   - Evening deep analysis (optional)")
+        
+        print()
         print("Press Ctrl+C to stop the entire system")
         print("=" * 70)
         print()
         
-        # Step 3: Start continuous trading
-        logger.info("🚀 Starting live paper trading loop...")
-        agent.run_continuous(interval_minutes=5)
+        # Step 3: Start continuous trading with intelligent scheduling
+        logger.info("🧠 Starting intelligent trading system...")
+        logger.info("   Adaptive scheduling enabled for optimal resource usage")
+        agent.run_continuous_intelligent()
         
     except KeyboardInterrupt:
         logger.info("🛑 Trading system stopped by user")

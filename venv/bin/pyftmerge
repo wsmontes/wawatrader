@@ -1,4 +1,4 @@
-#!/Users/wagnermontes/Documents/GitHub/_TESTS/WawaTrader/venv/bin/python3.12
+#!/Users/wagnermontes/Documents/GitHub/wawatrader/venv/bin/python3.12
 import sys
 from fontTools.merge import main
 if __name__ == '__main__':

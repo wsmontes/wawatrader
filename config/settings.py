@@ -41,6 +41,7 @@ class LMStudioConfig(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=-1)
     timeout: int = Field(default=30, ge=5, le=120)
+    trading_profile: str = Field(default="moderate", pattern="^(conservative|moderate|aggressive|maximum)$")
 
 
 class RiskConfig(BaseModel):
@@ -109,7 +110,8 @@ class Settings:
             api_key=os.getenv('LM_STUDIO_API_KEY', 'not-needed'),
             temperature=float(os.getenv('LLM_TEMPERATURE', '0.7')),
             max_tokens=int(os.getenv('LLM_MAX_TOKENS', '-1')),
-            timeout=int(os.getenv('LLM_TIMEOUT', '30'))
+            timeout=int(os.getenv('LLM_TIMEOUT', '30')),
+            trading_profile=os.getenv('TRADING_PROFILE', 'moderate')
         )
         
         self.risk = RiskConfig(

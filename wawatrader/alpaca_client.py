@@ -326,15 +326,17 @@ class AlpacaClient:
             else:
                 tf = TimeFrame.Day  # Default fallback
             
-            # Create request
+            # Create request - explicitly use IEX feed for free tier/paper trading
             request = StockBarsRequest(
                 symbol_or_symbols=[symbol],
                 timeframe=tf,
                 start=start,
                 end=end,
                 limit=limit,
-                feed='iex'  # Use IEX for paper trading
+                feed='iex'  # Use IEX for paper trading (free tier)
             )
+            
+            logger.debug(f"Requesting bars for {symbol} from {start} to {end} using IEX feed")
             
             # Get data
             try:
@@ -527,6 +529,89 @@ class AlpacaClient:
             return clock.is_open
         except Exception:
             return False
+
+    def get_market_status(self) -> Dict[str, Any]:
+        """
+        Get comprehensive market status with user-friendly information
+        
+        Returns:
+            Dictionary with detailed market status including:
+            - is_open: Boolean market status
+            - status_text: Human-readable status
+            - current_time: Current timestamp
+            - next_open: Next market open time
+            - next_close: Next market close time
+            - time_until_event: Time until next open/close
+            - trading_day: Whether today is a trading day
+        """
+        try:
+            clock = self.trading_client.get_clock()
+            
+            from datetime import datetime, timezone
+            
+            current_time = clock.timestamp
+            is_open = clock.is_open
+            next_open = clock.next_open
+            next_close = clock.next_close
+            
+            # Calculate time until next event
+            if is_open:
+                next_event = next_close
+                event_name = "close"
+            else:
+                next_event = next_open
+                event_name = "open"
+            
+            # Calculate time difference
+            time_diff = next_event - current_time
+            hours = int(time_diff.total_seconds() // 3600)
+            minutes = int((time_diff.total_seconds() % 3600) // 60)
+            
+            # Format time until
+            if time_diff.days > 0:
+                if time_diff.days == 1:
+                    time_until = f"{time_diff.days} day, {hours % 24} hours"
+                else:
+                    time_until = f"{time_diff.days} days, {hours % 24} hours"
+            elif hours > 0:
+                time_until = f"{hours} hours, {minutes} minutes"
+            else:
+                time_until = f"{minutes} minutes"
+            
+            # Determine status text
+            if is_open:
+                status_text = "🟢 OPEN"
+                status_message = f"Market is open. Closes in {time_until}"
+            else:
+                status_text = "🔴 CLOSED"
+                # Check if it's weekend/holiday (more than 1 day)
+                if time_diff.days > 0:
+                    day_name = next_open.strftime('%A')
+                    status_message = f"Market is closed. Opens {day_name} at {next_open.strftime('%I:%M %p ET')} (in {time_until})"
+                else:
+                    status_message = f"Market is closed. Opens today at {next_open.strftime('%I:%M %p ET')} (in {time_until})"
+            
+            return {
+                'is_open': is_open,
+                'status_text': status_text,
+                'status_message': status_message,
+                'current_time': current_time.isoformat(),
+                'next_open': next_open.isoformat(),
+                'next_close': next_close.isoformat(),
+                'next_event': event_name,
+                'time_until': time_until,
+                'time_diff_seconds': int(time_diff.total_seconds()),
+                'trading_hours': '9:30 AM - 4:00 PM ET (Mon-Fri)'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting market status: {e}")
+            return {
+                'is_open': False,
+                'status_text': '⚠️ UNKNOWN',
+                'status_message': 'Unable to determine market status',
+                'error': str(e)
+            }
 
     def get_orders(self, status: str = 'open') -> List[Dict[str, Any]]:
         """

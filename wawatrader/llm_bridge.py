@@ -30,6 +30,65 @@ class LLMBridge:
     The LLM provides sentiment/interpretation, NOT numerical decisions.
     """
     
+    # Trading profile definitions
+    TRADING_PROFILES = {
+        'conservative': {
+            'name': 'Conservative',
+            'description': 'Risk-averse with capital preservation focus',
+            'system_prompt': (
+                "You are a conservative trading analyst focused on capital preservation. "
+                "Prioritize safety over gains. Only recommend BUY when indicators show "
+                "strong confirmation and low risk. Prefer HOLD over risky positions. "
+                "Provide data-driven analysis in JSON format only."
+            ),
+            'min_confidence_buy': 75,
+            'min_confidence_sell': 70,
+            'risk_emphasis': 'high'
+        },
+        'moderate': {
+            'name': 'Moderate',
+            'description': 'Balanced approach between risk and reward',
+            'system_prompt': (
+                "You are a balanced trading analyst seeking reasonable risk-adjusted returns. "
+                "Recommend trades when technical indicators show good probability. "
+                "Consider both opportunities and risks equally. "
+                "Provide concise, data-driven analysis in JSON format only."
+            ),
+            'min_confidence_buy': 65,
+            'min_confidence_sell': 60,
+            'risk_emphasis': 'medium'
+        },
+        'aggressive': {
+            'name': 'Aggressive',
+            'description': 'Active trading seeking high returns',
+            'system_prompt': (
+                "You are an aggressive day trader focused on capturing market opportunities. "
+                "Recommend trades when technical indicators show potential. "
+                "Favor action over holding when clear signals appear. "
+                "Accept higher risk for higher reward potential. "
+                "Provide decisive, action-oriented analysis in JSON format only."
+            ),
+            'min_confidence_buy': 55,
+            'min_confidence_sell': 50,
+            'risk_emphasis': 'low'
+        },
+        'maximum': {
+            'name': 'Maximum Revenue and Risk',
+            'description': 'Maximum returns with corresponding risk acceptance',
+            'system_prompt': (
+                "You are a high-risk, high-reward trader seeking maximum returns. "
+                "Identify and act on any reasonable opportunity aggressively. "
+                "Recommend BUY on bullish signals and SELL on bearish signals without hesitation. "
+                "Minimize HOLD recommendations - prefer decisive action. "
+                "Accept substantial risk for potential maximum gains. "
+                "Provide bold, decisive analysis in JSON format only."
+            ),
+            'min_confidence_buy': 50,
+            'min_confidence_sell': 45,
+            'risk_emphasis': 'minimal'
+        }
+    }
+    
     def __init__(self):
         """Initialize LLM connection"""
         
@@ -41,12 +100,19 @@ class LLMBridge:
         self.model = settings.lm_studio.model
         self.temperature = settings.lm_studio.temperature
         self.max_tokens = settings.lm_studio.max_tokens
+        self.trading_profile = settings.lm_studio.trading_profile
         
         # Initialize conversation logging
         self.conversation_log = settings.project_root / "logs" / "llm_conversations.jsonl"
         self.conversation_log.parent.mkdir(exist_ok=True)
         
-        logger.info(f"LLM Bridge initialized (model: {self.model})")
+        # Validate and get profile config
+        self.profile_config = self.TRADING_PROFILES.get(
+            self.trading_profile, 
+            self.TRADING_PROFILES['moderate']
+        )
+        
+        logger.info(f"LLM Bridge initialized (model: {self.model}, profile: {self.profile_config['name']})")
     
     def indicators_to_text(self, signals: Dict[str, Any]) -> str:
         """
@@ -182,7 +248,21 @@ class LLMBridge:
                 prompt_parts.append(f"- Holding {shares} shares at ${avg_price:.2f} avg entry")
                 prompt_parts.append(f"- Current P&L: {pnl_pct:+.2f}%")
         
+        # Add profile-specific guidance
+        risk_emphasis = self.profile_config['risk_emphasis']
+        if risk_emphasis == 'high':
+            risk_note = "Emphasize risk factors heavily. Only recommend action with strong confirmation."
+        elif risk_emphasis == 'medium':
+            risk_note = "Balance opportunity and risk equally in your analysis."
+        elif risk_emphasis == 'low':
+            risk_note = "Focus on opportunities. Mention risks but don't let them prevent action."
+        else:  # minimal
+            risk_note = "Prioritize opportunities for maximum gains. Accept associated risks."
+        
         prompt_parts.extend([
+            "",
+            f"TRADING STYLE: {self.profile_config['description']}",
+            f"RISK APPROACH: {risk_note}",
             "",
             "Based on this information, provide your analysis in JSON format:",
             "{",
@@ -216,8 +296,7 @@ class LLMBridge:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a professional trading analyst. "
-                                   "Provide concise, data-driven analysis in JSON format only."
+                        "content": self.profile_config['system_prompt']
                     },
                     {
                         "role": "user",
@@ -468,6 +547,50 @@ class LLMBridge:
             'risk_factors': ['LLM unavailable', 'Using simplified rules'],
             'timestamp': datetime.now().isoformat(),
             'fallback_mode': True
+        }
+    
+    def get_current_profile(self) -> Dict[str, Any]:
+        """Get current trading profile information"""
+        return {
+            'profile': self.trading_profile,
+            'name': self.profile_config['name'],
+            'description': self.profile_config['description'],
+            'min_confidence_buy': self.profile_config['min_confidence_buy'],
+            'min_confidence_sell': self.profile_config['min_confidence_sell'],
+            'risk_emphasis': self.profile_config['risk_emphasis']
+        }
+    
+    def set_profile(self, profile_name: str) -> bool:
+        """
+        Change trading profile at runtime
+        
+        Args:
+            profile_name: One of 'conservative', 'moderate', 'aggressive', 'maximum'
+        
+        Returns:
+            True if successful, False if invalid profile
+        """
+        if profile_name not in self.TRADING_PROFILES:
+            logger.error(f"Invalid profile: {profile_name}")
+            return False
+        
+        self.trading_profile = profile_name
+        self.profile_config = self.TRADING_PROFILES[profile_name]
+        logger.info(f"Trading profile changed to: {self.profile_config['name']}")
+        return True
+    
+    @classmethod
+    def get_available_profiles(cls) -> Dict[str, Dict[str, Any]]:
+        """Get all available trading profiles"""
+        return {
+            name: {
+                'name': config['name'],
+                'description': config['description'],
+                'min_confidence_buy': config['min_confidence_buy'],
+                'min_confidence_sell': config['min_confidence_sell'],
+                'risk_emphasis': config['risk_emphasis']
+            }
+            for name, config in cls.TRADING_PROFILES.items()
         }
 
 

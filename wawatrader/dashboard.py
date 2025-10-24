@@ -145,6 +145,16 @@ class Dashboard:
                         padding: 0;
                     }
                     
+                    /* Animations */
+                    @keyframes pulse {
+                        0%, 100% {
+                            opacity: 1;
+                        }
+                        50% {
+                            opacity: 0.7;
+                        }
+                    }
+                    
                     /* Professional Container */
                     .professional-container {
                         background: var(--bg-primary);
@@ -904,6 +914,10 @@ class Dashboard:
                 
                 html.Div([
                     html.Div("LIVE", className="status-badge status-live"),
+                    html.Div(id="market-status", className="status-badge",
+                            style={"background": "var(--bg-tertiary)", "fontWeight": "600"}),
+                    html.Div(id="market-state", className="status-badge",
+                            style={"background": "var(--bg-tertiary)", "color": "var(--text-secondary)", "fontSize": "11px"}),
                     html.Div(id="system-time", className="status-badge", 
                             style={"background": "var(--bg-tertiary)", "color": "var(--text-secondary)"}),
                     html.Div(id="pnl-header", className="status-badge",
@@ -1064,14 +1078,64 @@ class Dashboard:
         
         @self.app.callback(
             [Output('system-time', 'children'),
+             Output('market-status', 'children'),
+             Output('market-status', 'style'),
+             Output('market-state', 'children'),
+             Output('market-state', 'style'),
              Output('pnl-header', 'children'),
              Output('pnl-header', 'style')],
             [Input('main-interval', 'n_intervals')]
         )
         def update_header(n):
-            """Update header with time and P&L"""
+            """Update header with time, market status, and P&L"""
             current_time = datetime.now().strftime("%H:%M:%S")
             
+            # Get market status
+            try:
+                market_status = self.alpaca.get_market_status()
+                is_open = market_status.get('is_open', False)
+                status_text = market_status.get('status_text', '⚠️ UNKNOWN')
+                time_info = market_status.get('time_until', '')
+                
+                # Import market state detector
+                try:
+                    from wawatrader.market_state import get_market_state
+                    market_state = get_market_state(self.alpaca)
+                    state_display = f"{market_state.emoji} {market_state.description}"
+                    state_style = {
+                        "background": "var(--bg-tertiary)",
+                        "color": "var(--text-secondary)",
+                        "fontSize": "11px"
+                    }
+                except Exception as e:
+                    logger.debug(f"Market state not available: {e}")
+                    state_display = ""
+                    state_style = {"display": "none"}
+                
+            except Exception as e:
+                logger.error(f"Error getting market status: {e}")
+                status_text = "⚠️ UNKNOWN"
+                is_open = False
+                time_info = ""
+                state_display = ""
+                state_style = {"display": "none"}
+            
+            # Style market status based on open/closed
+            if is_open:
+                market_status_style = {
+                    "background": "var(--accent-green)",
+                    "color": "white",
+                    "fontWeight": "600",
+                    "animation": "pulse 2s ease-in-out infinite"
+                }
+            else:
+                market_status_style = {
+                    "background": "var(--accent-red)",
+                    "color": "white",
+                    "fontWeight": "600"
+                }
+            
+            # Get P&L
             try:
                 # Get account info
                 account = self.alpaca.get_account()
@@ -1099,11 +1163,12 @@ class Dashboard:
                     "fontWeight": "bold"
                 }
                 
-                return current_time, pnl_text, pnl_style
-                
             except Exception as e:
-                logger.error(f"Error updating header: {e}")
-                return current_time, "P&L: --", {"background": "var(--bg-tertiary)", "color": "var(--text-muted)"}
+                logger.error(f"Error updating P&L: {e}")
+                pnl_text = "P&L: --"
+                pnl_style = {"background": "var(--bg-tertiary)", "color": "var(--text-muted)"}
+            
+            return current_time, status_text, market_status_style, state_display, state_style, pnl_text, pnl_style
         
         @self.app.callback(
             Output('main-chart', 'figure'),
@@ -1317,26 +1382,49 @@ class Dashboard:
                         
                         symbol = conv.get('symbol', 'Market')
                         
+                        # Determine if this is market intelligence or stock-specific analysis
+                        is_market_intelligence = (symbol == 'unknown' or symbol == 'Market')
+                        
                         # Parse response for sentiment/decision
                         decision = "Analyzing..."
                         confidence = 75
+                        sentiment = None
+                        regime = None
+                        recommendations = []
+                        
                         if 'response' in conv:
                             try:
-                                response_data = json.loads(conv['response'])
-                                decision = response_data.get('decision', 'hold').upper()
-                                confidence = response_data.get('confidence', 75)
+                                # Try to parse as market intelligence first
+                                response_data = json.loads(conv['response'].replace('```json\n', '').replace('\n```', ''))
+                                
+                                if 'market_sentiment' in response_data:
+                                    # This is market intelligence
+                                    sentiment = response_data.get('market_sentiment', 'neutral').upper()
+                                    confidence = response_data.get('confidence', 75)
+                                    regime = response_data.get('regime_assessment', '').replace('_', ' ').title()
+                                    recommendations = response_data.get('recommended_actions', [])
+                                    decision = f"{sentiment} Market"
+                                else:
+                                    # Regular stock trading decision
+                                    decision = response_data.get('decision', 'hold').upper()
+                                    confidence = response_data.get('confidence', 75)
                             except:
                                 pass
                         
-                        # Color based on decision
-                        decision_color = "#00ff88" if decision == "BUY" else "#ff4444" if decision == "SELL" else "#00aaff"
+                        # Color based on decision/sentiment
+                        if sentiment:
+                            decision_color = "#00ff88" if sentiment == "BULLISH" else "#ff4444" if sentiment == "BEARISH" else "#00aaff"
+                        else:
+                            decision_color = "#00ff88" if decision == "BUY" else "#ff4444" if decision == "SELL" else "#00aaff"
                         
                         # Extract key insights from prompt
                         prompt_summary = ""
                         if 'prompt' in conv:
                             prompt = conv['prompt']
-                            # Extract key market data if present
-                            if "RSI" in prompt or "price" in prompt or "trend" in prompt:
+                            # Check if it's market intelligence
+                            if "MARKET SCREENING" in prompt or "SECTOR ANALYSIS" in prompt:
+                                prompt_summary = "Analyzing market sectors, regime indicators, and risk factors for broad market intelligence."
+                            elif "RSI" in prompt or "price" in prompt or "trend" in prompt:
                                 prompt_summary = "Analyzing technical indicators and price action."
                             else:
                                 # Take first 100 chars as summary
@@ -1367,14 +1455,17 @@ class Dashboard:
                                         "color": "#00aaff",
                                         "marginBottom": "6px"
                                     }),
-                                    html.Div(f"What's the trading decision for {symbol}?", style={
-                                        "fontSize": "12px",
-                                        "color": "var(--text-secondary)",
-                                        "marginLeft": "24px",
-                                        "marginBottom": "6px",
-                                        "fontStyle": "italic",
-                                        "lineHeight": "1.4"
-                                    }),
+                                    html.Div(
+                                        f"What's the market outlook?" if is_market_intelligence else f"What's the trading decision for {symbol}?",
+                                        style={
+                                            "fontSize": "12px",
+                                            "color": "var(--text-secondary)",
+                                            "marginLeft": "24px",
+                                            "marginBottom": "6px",
+                                            "fontStyle": "italic",
+                                            "lineHeight": "1.4"
+                                        }
+                                    ),
                                     html.Div(prompt_summary, style={
                                         "fontSize": "11px",
                                         "color": "var(--text-muted)",
@@ -1389,42 +1480,85 @@ class Dashboard:
                                     "marginBottom": "12px"
                                 }),
                                 
-                                # Answer (AI)
+                                # Answer (AI) - different display for market intelligence
                                 html.Div([
-                                    html.Div("🤖 AI Assistant", style={
+                                    html.Div("🤖 AI Market Analyst" if is_market_intelligence else "🤖 AI Assistant", style={
                                         "fontSize": "12px",
                                         "fontWeight": "600",
                                         "color": decision_color,
                                         "marginBottom": "6px"
                                     }),
+                                    # Show market intelligence details
                                     html.Div([
-                                        html.Span("Decision: ", style={
-                                            "color": "var(--text-muted)",
-                                            "fontSize": "12px"
+                                        html.Div([
+                                            html.Span("Market Sentiment: " if is_market_intelligence else "Decision: ", style={
+                                                "color": "var(--text-muted)",
+                                                "fontSize": "12px"
+                                            }),
+                                            html.Span(sentiment if sentiment else decision, style={
+                                                "fontWeight": "700",
+                                                "color": decision_color,
+                                                "fontSize": "13px",
+                                                "letterSpacing": "0.5px"
+                                            })
+                                        ], style={
+                                            "marginLeft": "24px",
+                                            "marginBottom": "8px"
                                         }),
-                                        html.Span(decision, style={
-                                            "fontWeight": "700",
-                                            "color": decision_color,
-                                            "fontSize": "13px",
-                                            "letterSpacing": "0.5px"
-                                        })
-                                    ], style={
-                                        "marginLeft": "24px",
-                                        "marginBottom": "8px"
-                                    }),
-                                    html.Div([
-                                        html.Span("Confidence: ", style={
-                                            "color": "var(--text-muted)",
-                                            "fontSize": "12px"
+                                        html.Div([
+                                            html.Span("Confidence: ", style={
+                                                "color": "var(--text-muted)",
+                                                "fontSize": "12px"
+                                            }),
+                                            html.Span(f"{confidence}%", style={
+                                                "fontWeight": "700",
+                                                "color": "#00ff88" if confidence >= 70 else "#ffaa00",
+                                                "fontSize": "13px"
+                                            })
+                                        ], style={
+                                            "marginLeft": "24px",
+                                            "marginBottom": "8px" if regime or recommendations else "0px"
                                         }),
-                                        html.Span(f"{confidence}%", style={
-                                            "fontWeight": "700",
-                                            "color": "#00ff88" if confidence >= 70 else "#ffaa00",
-                                            "fontSize": "13px"
-                                        })
-                                    ], style={
-                                        "marginLeft": "24px"
-                                    })
+                                        # Show regime assessment if available
+                                        html.Div([
+                                            html.Span("Market Regime: ", style={
+                                                "color": "var(--text-muted)",
+                                                "fontSize": "12px"
+                                            }),
+                                            html.Span(regime, style={
+                                                "fontWeight": "600",
+                                                "color": "var(--text-secondary)",
+                                                "fontSize": "12px"
+                                            })
+                                        ], style={
+                                            "marginLeft": "24px",
+                                            "marginBottom": "8px"
+                                        }) if regime else None,
+                                        # Show top recommendations if available
+                                        html.Div([
+                                            html.Div("Key Recommendations:", style={
+                                                "color": "var(--text-muted)",
+                                                "fontSize": "11px",
+                                                "marginLeft": "24px",
+                                                "marginBottom": "4px"
+                                            }),
+                                            html.Ul([
+                                                html.Li(rec if isinstance(rec, str) else rec.get('action', str(rec)), style={
+                                                    "fontSize": "11px",
+                                                    "color": "var(--text-secondary)",
+                                                    "lineHeight": "1.4",
+                                                    "marginBottom": "2px"
+                                                }) for rec in recommendations[:2]  # Show first 2 recommendations
+                                            ], style={
+                                                "marginLeft": "24px",
+                                                "paddingLeft": "16px",
+                                                "marginTop": "0",
+                                                "marginBottom": "0"
+                                            })
+                                        ], style={
+                                            "marginTop": "4px"
+                                        }) if recommendations else None
+                                    ])
                                 ], style={
                                     "background": f"rgba({int(decision_color[1:3], 16)}, {int(decision_color[3:5], 16)}, {int(decision_color[5:7], 16)}, 0.1)",
                                     "borderLeft": f"3px solid {decision_color}",

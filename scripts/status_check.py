@@ -16,9 +16,28 @@ def main():
     print()
     
     try:
-        # Test Alpaca connection
+        # Test Alpaca connection and get market status
         from wawatrader.alpaca_client import get_client
         client = get_client()
+        
+        # Get detailed market status
+        print("📊 MARKET STATUS:")
+        market_status = client.get_market_status()
+        print(f"   {market_status.get('status_text', '⚠️ UNKNOWN')}")
+        print(f"   {market_status.get('status_message', 'Unable to determine status')}")
+        print(f"   Trading Hours: {market_status.get('trading_hours', '9:30 AM - 4:00 PM ET (Mon-Fri)')}")
+        
+        if not market_status.get('is_open', False):
+            time_until = market_status.get('time_until', 'unknown')
+            print(f"   ⏰ Time until open: {time_until}")
+            print(f"   💤 Trading agent will wait for market to open")
+        else:
+            time_until = market_status.get('time_until', 'unknown')
+            print(f"   ⏰ Time until close: {time_until}")
+            print(f"   🟢 Ready to trade!")
+        print()
+        
+        # Get account info
         account = client.get_account()
         
         print("✅ ALPACA CONNECTION:")
@@ -71,13 +90,13 @@ def main():
         print()
         print("📊 Dashboard: http://127.0.0.1:8050")
         print("💰 Mode: Paper Trading (safe)")
-        print("🔄 Ready for: Live market analysis")
+        
+        if market_status.get('is_open', False):
+            print("🔄 Status: Market is OPEN - Ready for live trading")
+        else:
+            print("💤 Status: Market is CLOSED - Agent will wait for open")
         print()
-        print("⚡ To execute trades:")
-        print("   • Market hours: 9:30 AM - 4:00 PM ET")
-        print("   • Use trading agent with real-time data")
-        print("   • All trades are paper trades (no real money)")
-        print()
+        
         print("🛡️ Safety Features Active:")
         print("   • Position size limits (10% max)")
         print("   • Daily loss limits (2% max)")

@@ -27,10 +27,10 @@ import os
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.absolute()
 
-# Virtual environment paths to check
+# Virtual environment paths to check (in order of priority)
 VENV_PATHS = [
-    PROJECT_ROOT / 'venv',
-    PROJECT_ROOT / '.venv',
+    PROJECT_ROOT / 'venv',           # Local venv (recommended)
+    PROJECT_ROOT / '.venv',          # Alternative local venv
     Path.home() / '.pyenv' / 'versions' / 'wawatrader',
     Path('/opt/homebrew/var/pyenv/versions/wawatrader')
 ]
@@ -233,6 +233,38 @@ def check_environment() -> bool:
         
     return True
 
+def display_market_status():
+    """Display current market status"""
+    try:
+        # Add project to path temporarily
+        sys.path.insert(0, str(PROJECT_ROOT))
+        from wawatrader.alpaca_client import get_client
+        
+        client = get_client()
+        status = client.get_market_status()
+        
+        print()
+        print("📊 Market Status")
+        print("-" * 40)
+        print(f"   {status.get('status_text', '⚠️ UNKNOWN')}")
+        print(f"   {status.get('status_message', 'Unable to determine status')}")
+        print(f"   Hours: {status.get('trading_hours', '9:30 AM - 4:00 PM ET')}")
+        
+        # Add helpful context based on status
+        if not status.get('is_open', False):
+            print()
+            print("   💡 Tip: The trading agent will wait for market to open")
+            print("          You can start it now and it will begin trading automatically")
+        
+        print()
+        
+    except Exception as e:
+        # Don't fail startup if market status check fails
+        print()
+        print("⚠️  Could not check market status (will check again when trading starts)")
+        print(f"   Error: {e}")
+        print()
+
 def main():
     """Main entry point"""
     print_header()
@@ -249,12 +281,19 @@ def main():
         print("   Use 'python start.py help' for detailed help")
         print("   Dashboard: http://localhost:8050")
         print("   Note: Dashboard may show warnings (safe to ignore)")
-        print()
+        
+        # Show market status for trading commands
+        display_market_status()
+        
         cmd = 'full'
         args = []
     else:
         cmd = sys.argv[1].lower()
         args = sys.argv[2:] if len(sys.argv) > 2 else []
+        
+        # Show market status for trading-related commands
+        if cmd in ['full', 'trading', 'backtest']:
+            display_market_status()
     
     # Handle special commands first
     if cmd in ['help', '--help', '-h']:
