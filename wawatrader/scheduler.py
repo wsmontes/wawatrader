@@ -129,7 +129,7 @@ class IntelligentScheduler:
         self.register_task(ScheduledTask(
             name="trading_cycle",
             description="Execute trading cycle (check prices, analyze, trade)",
-            interval_minutes=5,
+            interval_minutes=20,  # Changed from 5 to 20 to reduce overtrading (was creating 70+ opportunities/day)
             market_states=[MarketState.ACTIVE_TRADING],
         ))
         

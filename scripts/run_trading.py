@@ -49,8 +49,21 @@ def start_dashboard():
         return False
 
 def signal_handler(sig, frame):
+    """Graceful shutdown handler"""
+    logger.info("")
     logger.info("🛑 Stopping trading system...")
+    
+    # Stop position monitoring first
+    try:
+        if 'agent' in globals():
+            agent.stop_position_monitoring()
+            logger.info("✅ PositionManager stopped")
+    except Exception as e:
+        logger.error(f"⚠️  Error stopping PositionManager: {e}")
+    
     logger.info("📊 Dashboard will stop automatically")
+    logger.info("⚡ Trading agent stopped")
+    logger.info("🏁 Shutdown complete")
     sys.exit(0)
 
 def main():
@@ -94,7 +107,16 @@ def main():
         # Step 2: Initialize Trading Agent
         print("⚡ Initializing trading agent...")
         symbols = ["AAPL", "MSFT", "GOOGL", "TSLA", "NVDA"]
-        agent = TradingAgent(symbols=symbols, dry_run=False)  # NOT dry run - real paper trading
+        agent = TradingAgent(symbols=symbols, dry_run=False)  # Paper trading mode - no real money
+        
+        # Step 2.5: Start PositionManager monitoring (CRITICAL!)
+        print("📡 Starting event-driven position monitoring...")
+        from datetime import datetime, time as dt_time
+        # Set market close time (3:30 PM EST for 30-min safety buffer)
+        market_close = datetime.now().replace(hour=15, minute=30, second=0, microsecond=0)
+        agent.set_market_close_time(market_close)
+        agent.start_position_monitoring()
+        print("✅ PositionManager monitoring active (15-second polling)")
         
         print()
         print("🎯 SYSTEM READY")

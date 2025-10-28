@@ -275,7 +275,7 @@ class SystemOrchestrator:
             else:
                 logger.info("ℹ️  No overnight analysis available (file not found)")
             
-            agent = TradingAgent(symbols=watchlist, dry_run=False, overnight_analysis=overnight_analysis)
+            agent = TradingAgent(symbols=watchlist, dry_run=False)
             
             logger.info(f"🎯 Trading agent initialized")
             logger.info(f"   Watchlist: {', '.join(watchlist[:10])}{'...' if len(watchlist) > 10 else ''}")

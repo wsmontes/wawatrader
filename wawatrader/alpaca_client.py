@@ -10,12 +10,20 @@ Maintains the same interface for backward compatibility while providing:
 - More reliable market data access
 
 Migration from alpaca-trade-api to alpaca-py while preserving existing API.
+
+LOGGING STRATEGY:
+- All market data logged to logs/market_data/ for replay testing
+- All account/position snapshots logged to logs/account_snapshots/
+- All order executions logged to logs/order_executions/
+- JSON format for easy parsing and strategy evaluation
 """
 
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
+import json
+from pathlib import Path
 from loguru import logger
 
 # Modern alpaca-py imports
@@ -63,6 +71,16 @@ class AlpacaClient:
                 secret_key=settings.alpaca.secret_key
             )
             
+            # Setup data logging directories
+            self.log_dir = settings.project_root / "logs"
+            self.market_data_log = self.log_dir / "market_data.jsonl"
+            self.account_snapshot_log = self.log_dir / "account_snapshots.jsonl"
+            self.order_execution_log = self.log_dir / "order_executions.jsonl"
+            self.position_snapshot_log = self.log_dir / "position_snapshots.jsonl"
+            
+            # Create log directory
+            self.log_dir.mkdir(exist_ok=True)
+            
             # Verify connection by getting account
             account = self.trading_client.get_account()
             logger.info(f"✅ Connected to Alpaca (Account: {account.account_number})")
@@ -75,6 +93,21 @@ class AlpacaClient:
         except Exception as e:
             logger.error(f"❌ Unexpected error initializing Alpaca: {e}")
             raise
+    
+    def _log_to_file(self, filepath: Path, data: Dict[str, Any]):
+        """
+        Append structured data to JSONL log file
+        
+        Args:
+            filepath: Path to log file
+            data: Dictionary to log (will add timestamp)
+        """
+        try:
+            data['timestamp'] = datetime.now().isoformat()
+            with open(filepath, 'a') as f:
+                f.write(json.dumps(data) + '\n')
+        except Exception as e:
+            logger.error(f"Failed to log to {filepath}: {e}")
     
     def _get_best_feed(self, prefer_sip: bool = True) -> str:
         """
@@ -135,7 +168,7 @@ class AlpacaClient:
         try:
             account = self.trading_client.get_account()
             
-            return {
+            account_data = {
                 'account_number': account.account_number,
                 'status': account.status.value,
                 'currency': account.currency,
@@ -152,6 +185,15 @@ class AlpacaClient:
                 'transfers_blocked': account.transfers_blocked,
                 'account_blocked': account.account_blocked
             }
+            
+            # Log account snapshot
+            logger.info(f"📊 Account: ${account_data['portfolio_value']:,.2f} portfolio, ${account_data['buying_power']:,.2f} buying power")
+            self._log_to_file(self.account_snapshot_log, {
+                'event': 'account_fetch',
+                'data': account_data
+            })
+            
+            return account_data
             
         except APIError as e:
             logger.error(f"❌ Failed to get account info: {e}")
@@ -172,7 +214,7 @@ class AlpacaClient:
             
             result = []
             for pos in positions:
-                result.append({
+                position_data = {
                     'asset_id': pos.asset_id,
                     'symbol': pos.symbol,
                     'asset_class': pos.asset_class.value,
@@ -185,7 +227,23 @@ class AlpacaClient:
                     'current_price': float(pos.current_price) if pos.current_price else 0.0,
                     'avg_entry_price': float(pos.avg_entry_price) if pos.avg_entry_price else 0.0,
                     'change_today': float(pos.change_today) if pos.change_today else 0.0
-                })
+                }
+                result.append(position_data)
+            
+            # Log positions snapshot
+            if result:
+                logger.info(f"📊 Positions: {len(result)} open positions")
+                for pos in result:
+                    pnl_pct = pos['unrealized_plpc'] * 100
+                    logger.info(f"   {pos['symbol']}: {pos['qty']} shares @ ${pos['current_price']:.2f} (P&L: {pnl_pct:+.2f}%)")
+            else:
+                logger.info("📊 Positions: No open positions")
+            
+            self._log_to_file(self.position_snapshot_log, {
+                'event': 'positions_fetch',
+                'count': len(result),
+                'positions': result
+            })
             
             return result
             
@@ -209,7 +267,7 @@ class AlpacaClient:
         try:
             position = self.trading_client.get_open_position(symbol)
             
-            return {
+            position_data = {
                 'asset_id': position.asset_id,
                 'symbol': position.symbol,
                 'asset_class': position.asset_class.value,
@@ -223,6 +281,17 @@ class AlpacaClient:
                 'avg_entry_price': float(position.avg_entry_price) if position.avg_entry_price else 0.0,
                 'change_today': float(position.change_today) if position.change_today else 0.0
             }
+            
+            pnl_pct = position_data['unrealized_plpc'] * 100
+            logger.debug(f"📊 Position {symbol}: {position_data['qty']} shares @ ${position_data['current_price']:.2f} (P&L: {pnl_pct:+.2f}%)")
+            
+            self._log_to_file(self.position_snapshot_log, {
+                'event': 'position_fetch',
+                'symbol': symbol,
+                'data': position_data
+            })
+            
+            return position_data
             
         except APIError as e:
             logger.debug(f"No position found for {symbol}: {e}")
@@ -319,6 +388,8 @@ class AlpacaClient:
             elif isinstance(start, str):
                 start = pd.to_datetime(start)
             
+            logger.debug(f"📊 Fetching {timeframe} bars for {symbol} from {start.date()} to {end.date()}")
+            
             # Convert timeframe string to TimeFrame object
             if timeframe == "1Min":
                 tf = TimeFrame.Minute
@@ -367,7 +438,22 @@ class AlpacaClient:
                     df = pd.DataFrame(data)
                     df.set_index('timestamp', inplace=True)
                     
-                    logger.debug(f"Retrieved {len(df)} bars for {symbol}")
+                    logger.info(f"📊 Retrieved {len(df)} {timeframe} bars for {symbol} (latest: ${df['close'].iloc[-1]:.2f})")
+                    
+                    # Log market data for replay capability
+                    self._log_to_file(self.market_data_log, {
+                        'event': 'bars_fetch',
+                        'symbol': symbol,
+                        'timeframe': timeframe,
+                        'start': start.isoformat(),
+                        'end': end.isoformat(),
+                        'count': len(df),
+                        'latest_close': float(df['close'].iloc[-1]),
+                        'latest_volume': int(df['volume'].iloc[-1]),
+                        # Store last 5 bars for context
+                        'recent_bars': df.tail(5).reset_index().to_dict('records')
+                    })
+                    
                     return df
                 else:
                     logger.warning(f"No bars returned for {symbol}")
@@ -648,6 +734,8 @@ class AlpacaClient:
             Order details dict or None if failed
         """
         try:
+            logger.info(f"📤 Placing {side.upper()} order: {qty} shares of {symbol}")
+            
             # Convert side string to enum
             order_side = OrderSide.BUY if side.lower() == 'buy' else OrderSide.SELL
             
@@ -672,7 +760,7 @@ class AlpacaClient:
             order = self.trading_client.submit_order(request)
             
             # Convert to dict
-            return {
+            order_data = {
                 'id': order.id,
                 'client_order_id': order.client_order_id,
                 'created_at': order.created_at.isoformat() if order.created_at else None,
@@ -685,8 +773,33 @@ class AlpacaClient:
                 'filled_qty': float(order.filled_qty) if order.filled_qty else 0.0
             }
             
+            logger.info(f"✅ Order submitted: {order_data['id']} ({order_data['status']})")
+            
+            # Log order submission
+            self._log_to_file(self.order_execution_log, {
+                'event': 'order_submitted',
+                'order_id': order_data['id'],
+                'symbol': symbol,
+                'side': side,
+                'qty': qty,
+                'time_in_force': time_in_force,
+                'order_data': order_data
+            })
+            
+            return order_data
+            
         except Exception as e:
             logger.error(f"❌ Error placing market order for {symbol}: {e}")
+            
+            # Log failed order attempt
+            self._log_to_file(self.order_execution_log, {
+                'event': 'order_failed',
+                'symbol': symbol,
+                'side': side,
+                'qty': qty,
+                'error': str(e)
+            })
+            
             return None
     
     def wait_for_order_fill(self, order_id: str, timeout_seconds: int = 30) -> Optional[Dict[str, Any]]:
@@ -704,12 +817,13 @@ class AlpacaClient:
         
         try:
             start_time = time.time()
+            logger.debug(f"⏳ Waiting for order {order_id} to fill (timeout: {timeout_seconds}s)")
             
             while time.time() - start_time < timeout_seconds:
                 order = self.trading_client.get_order_by_id(order_id)
                 
                 if order.status.value in ['filled', 'canceled', 'expired', 'rejected']:
-                    return {
+                    order_data = {
                         'id': order.id,
                         'symbol': order.symbol,
                         'qty': float(order.qty) if order.qty else 0.0,
@@ -718,11 +832,37 @@ class AlpacaClient:
                         'filled_avg_price': float(order.filled_avg_price) if order.filled_avg_price else 0.0,
                         'filled_qty': float(order.filled_qty) if order.filled_qty else 0.0
                     }
+                    
+                    if order.status.value == 'filled':
+                        logger.info(f"✅ Order {order_id} FILLED: {order_data['filled_qty']} shares @ ${order_data['filled_avg_price']:.2f}")
+                    else:
+                        logger.warning(f"⚠️ Order {order_id} {order.status.value.upper()}")
+                    
+                    # Log order fill result
+                    self._log_to_file(self.order_execution_log, {
+                        'event': 'order_filled',
+                        'order_id': order_id,
+                        'status': order.status.value,
+                        'filled_price': order_data['filled_avg_price'],
+                        'filled_qty': order_data['filled_qty'],
+                        'wait_time_seconds': time.time() - start_time,
+                        'order_data': order_data
+                    })
+                    
+                    return order_data
                 
                 time.sleep(0.5)  # Check every 500ms
             
             # Timeout
             logger.warning(f"⏰ Order {order_id} did not fill within {timeout_seconds}s")
+            
+            # Log timeout
+            self._log_to_file(self.order_execution_log, {
+                'event': 'order_timeout',
+                'order_id': order_id,
+                'timeout_seconds': timeout_seconds
+            })
+            
             return None
             
         except Exception as e:

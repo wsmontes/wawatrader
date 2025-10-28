@@ -214,7 +214,7 @@ class MarketContextCapture:
         """Get SPY context (market-wide proxy)"""
         try:
             # Get SPY bars for multiple timeframes
-            bars = self.alpaca.get_bars("SPY", "1Day", limit=30)
+            bars = self.alpaca.get_bars("SPY", timeframe="1Day", limit=30)
             
             if bars.empty:
                 return self._default_spy_context()
@@ -245,7 +245,7 @@ class MarketContextCapture:
         """Get VIX context"""
         try:
             # Try to get VIX data (may not be available in all accounts)
-            bars = self.alpaca.get_bars("VIX", "1Day", limit=60)
+            bars = self.alpaca.get_bars("VIX", timeframe="1Day", limit=60)
             
             if bars.empty:
                 return self._default_vix_context()
@@ -295,7 +295,7 @@ class MarketContextCapture:
             momentum = {}
             for sector_name, etf in sectors.items():
                 try:
-                    bars = self.alpaca.get_bars(etf, "1Day", limit=2)
+                    bars = self.alpaca.get_bars(etf, timeframe="1Day", limit=2)
                     if not bars.empty:
                         change = ((bars['close'].iloc[-1] / bars['close'].iloc[-2]) - 1) * 100
                         momentum[sector_name] = change

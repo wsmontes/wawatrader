@@ -363,23 +363,32 @@ class LLMBridge:
             "",
             "You MUST choose BUY, SELL, or HOLD based on:",
             "",
+            "💰 TRANSACTION COST REALITY:",
+            "   - Every trade costs ~$5-10 in commissions, slippage, and spread",
+            "   - Frequent trading burns capital through friction",
+            "   - Only recommend trades with expected profit > 1% ($50+ on $5000 position)",
+            "   - Multi-day holds generate profit; intraday scalping loses money",
+            "",
             "✅ BUY Criteria:",
             "   - Bullish trend (price > SMA20) + positive momentum (RSI 50-70)",
             "   - Volume confirms (≥1.2x average shows conviction)",
             "   - News is neutral-to-positive OR technical signals override news",
+            "   - Expected profit significantly exceeds $10 transaction cost",
             f"   - Confidence ≥{self.profile_config['min_confidence_buy']}%",
             "",
             "❌ SELL Criteria:",
             "   - Bearish trend (price < SMA20) OR weakening momentum (RSI <40 or >75)",
             "   - Major negative catalyst OR technical breakdown",
+            "   - Position profit target reached (lock in gains > transaction costs)",
             f"   - Confidence ≥{self.profile_config['min_confidence_sell']}%",
             "",
-            "⏸️  HOLD - Reserve for GENUINELY MIXED signals only:",
+            "⏸️  HOLD - Prefer this for marginal signals:",
             "   - Conflicting technical + fundamental signals of equal strength",
+            "   - Expected profit < $50 (not worth transaction costs)",
             "   - Awaiting key catalyst within 24-48 hours (earnings, Fed decision)",
-            "   - Confidence <60% in either direction",
+            "   - Confidence <70% in either direction",
             "",
-            "⚡ DEFAULT TO ACTION: If trend and momentum align, favor BUY or SELL over HOLD",
+            "⚡ PREFER QUALITY OVER QUANTITY: One good trade > five marginal trades",
             ""
         ])
         
@@ -425,11 +434,16 @@ class LLMBridge:
             "",
             "REASONING QUALITY REQUIREMENTS:",
             "❌ BAD: 'Bullish trend suggests holding position'",
-            "✅ GOOD: 'BUY: Price broke $250 resistance on 1.67x volume. RSI at 56 shows room to run. Target $265 (+6%), stop $245 (-2%)'",
+            "✅ GOOD: 'Strong breakout above $250 resistance with 1.67x volume confirms bullish momentum. RSI at 56 indicates room for continuation. Price target: $265 (+6%), stop-loss: $245 (-2%)'",
             "",
             "RISK FACTOR REQUIREMENTS:",
             "❌ BAD: ['Market volatility', 'Economic uncertainty']",
             "✅ GOOD: ['[CRITICAL]: Earnings Oct 30 could trigger -8% if miss', '[HIGH]: Fed meeting Oct 25 may shift sentiment']",
+            "",
+            "⚠️  ACTION FIELD RULES:",
+            "   • 'buy' = Open a NEW position (only valid if NO current position)",
+            "   • 'sell' = Close EXISTING position (only valid if position exists)",  
+            "   • 'hold' = Take no action (valid in either case)",
             "",
             "⚠️  CRITICAL: Respond ONLY with valid JSON. No markdown code blocks, no extra text."
         ])
@@ -576,6 +590,27 @@ class LLMBridge:
             if not isinstance(data['reasoning'], str):
                 logger.error("Reasoning must be a string")
                 return None
+            
+            # NEW: Check for reasoning-action mismatches (LLM hallucination/confusion)
+            reasoning_lower = data['reasoning'].lower()
+            action = data['action'].lower()
+            
+            # Detect if reasoning starts with opposing action
+            if action == 'sell' and reasoning_lower.startswith('buy:'):
+                logger.warning(f"⚠️ Reasoning starts with 'BUY:' but action is 'sell' - likely LLM confusion. Checking sentiment...")
+                # If sentiment is bullish and reasoning says BUY, the LLM meant BUY
+                if data['sentiment'] == 'bullish':
+                    logger.warning(f"🔧 CORRECTING: Sentiment is bullish, reasoning says BUY, changing action from 'sell' to 'buy'")
+                    data['action'] = 'buy'
+                    data['reasoning'] = f"[AUTO-CORRECTED from 'sell'] {data['reasoning']}"
+            
+            elif action == 'buy' and reasoning_lower.startswith('sell:'):
+                logger.warning(f"⚠️ Reasoning starts with 'SELL:' but action is 'buy' - likely LLM confusion. Checking sentiment...")
+                # If sentiment is bearish and reasoning says SELL, the LLM meant SELL
+                if data['sentiment'] == 'bearish':
+                    logger.warning(f"🔧 CORRECTING: Sentiment is bearish, reasoning says SELL, changing action from 'buy' to 'sell'")
+                    data['action'] = 'sell'
+                    data['reasoning'] = f"[AUTO-CORRECTED from 'buy'] {data['reasoning']}"
             
             # Risk factors are optional but should be a list if present
             if 'risk_factors' in data and not isinstance(data['risk_factors'], list):

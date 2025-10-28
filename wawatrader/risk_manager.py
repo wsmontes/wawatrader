@@ -214,6 +214,11 @@ class RiskManager:
         """
         Check if we're trading too frequently (prevents overtrading).
         
+        DYNAMIC FREQUENCY CONTROL:
+        - No hard limit on trades if profitable
+        - Restricts trading if losing money (poor strategy day)
+        - Emergency liquidation if critical loss threshold reached
+        
         Args:
             symbol: Stock ticker
             action: "buy" or "sell"
@@ -221,25 +226,38 @@ class RiskManager:
         Returns:
             RiskCheckResult with approval
         """
-        max_trades_per_day = 10  # Hard limit
-        
         warnings = []
         
-        if self.trade_count_today >= max_trades_per_day:
+        # Check current P&L performance
+        today_pnl = self.daily_losses.get(date.today(), 0)
+        
+        # RULE 1: Always allow SELL orders (never block position exits)
+        if action.lower() == 'sell':
+            return RiskCheckResult(
+                approved=True,
+                reason=f"SELL approved (exit always allowed): {self.trade_count_today} trades today, P&L: ${today_pnl:,.2f}",
+                warnings=warnings
+            )
+        
+        # RULE 2: Block BUY orders if losing significant money (poor strategy day)
+        # Only restrict NEW positions when bleeding capital
+        loss_threshold = -0.01  # -1% loss triggers restriction
+        if today_pnl < loss_threshold * 100000:  # Assuming ~100k portfolio
             return RiskCheckResult(
                 approved=False,
-                reason=f"Daily trade limit reached: {self.trade_count_today}/{max_trades_per_day} trades today"
+                reason=f"Trading restricted due to losses: ${today_pnl:,.2f} today. Only SELL orders allowed to reduce exposure."
             )
         
-        # Warning if approaching limit
-        if self.trade_count_today >= max_trades_per_day * 0.8:
+        # RULE 3: Warning if high frequency (informational only)
+        if self.trade_count_today >= 20:
             warnings.append(
-                f"High trade frequency: {self.trade_count_today}/{max_trades_per_day} trades today"
+                f"⚠️ High trade frequency: {self.trade_count_today} trades today (P&L: ${today_pnl:,.2f})"
             )
         
+        # All clear - allow trade
         return RiskCheckResult(
             approved=True,
-            reason=f"Trade frequency OK: {self.trade_count_today}/{max_trades_per_day} trades today",
+            reason=f"Trade frequency OK: {self.trade_count_today} trades today, P&L: ${today_pnl:,.2f}",
             warnings=warnings
         )
     
@@ -360,6 +378,78 @@ class RiskManager:
         logger.info(f"Resetting daily counters for {today}")
         
         self.trade_count_today = 0
+    
+    def check_emergency_liquidation(
+        self,
+        current_pnl: float,
+        account_value: float
+    ) -> Dict[str, Any]:
+        """
+        Check if emergency liquidation is needed due to excessive losses.
+        
+        DYNAMIC LIQUIDATION RULES:
+        - WARNING at -1.5% daily loss (prepare to exit)
+        - CRITICAL at -1.8% daily loss (suggest liquidation)
+        - EMERGENCY at -2.0% daily loss (mandatory liquidation - same as max_daily_loss)
+        
+        Args:
+            current_pnl: Today's P&L
+            account_value: Total account value
+        
+        Returns:
+            Dict with:
+                - liquidate: bool (True if should liquidate all positions)
+                - severity: str ('none', 'warning', 'critical', 'emergency')
+                - message: str (explanation)
+                - loss_pct: float (current loss percentage)
+        """
+        loss_pct = abs(current_pnl) / account_value if current_pnl < 0 else 0
+        
+        # EMERGENCY: Mandatory liquidation (same as daily loss limit)
+        if loss_pct >= self.max_daily_loss:
+            logger.error(f"🚨 EMERGENCY LIQUIDATION TRIGGERED!")
+            logger.error(f"   Loss: ${current_pnl:,.2f} ({loss_pct*100:.2f}%) >= {self.max_daily_loss*100:.1f}% limit")
+            logger.error(f"   ACTION: Selling all positions to prevent further damage")
+            return {
+                'liquidate': True,
+                'severity': 'emergency',
+                'message': f'EMERGENCY: Loss {loss_pct*100:.2f}% reached max {self.max_daily_loss*100:.1f}% limit. Liquidating all positions.',
+                'loss_pct': loss_pct
+            }
+        
+        # CRITICAL: Strong suggestion to liquidate (90% of limit)
+        critical_threshold = self.max_daily_loss * 0.90
+        if loss_pct >= critical_threshold:
+            logger.warning(f"🔴 CRITICAL LOSS LEVEL!")
+            logger.warning(f"   Loss: ${current_pnl:,.2f} ({loss_pct*100:.2f}%) approaching {self.max_daily_loss*100:.1f}% limit")
+            logger.warning(f"   SUGGESTION: Consider liquidating positions")
+            return {
+                'liquidate': True,
+                'severity': 'critical',
+                'message': f'CRITICAL: Loss {loss_pct*100:.2f}% near limit. Strong liquidation recommendation.',
+                'loss_pct': loss_pct
+            }
+        
+        # WARNING: Approaching danger zone (75% of limit)
+        warning_threshold = self.max_daily_loss * 0.75
+        if loss_pct >= warning_threshold:
+            logger.warning(f"⚠️ HIGH LOSS WARNING!")
+            logger.warning(f"   Loss: ${current_pnl:,.2f} ({loss_pct*100:.2f}%)")
+            logger.warning(f"   Monitor closely - approaching {self.max_daily_loss*100:.1f}% limit")
+            return {
+                'liquidate': False,
+                'severity': 'warning',
+                'message': f'WARNING: Loss {loss_pct*100:.2f}% approaching danger zone. New positions restricted.',
+                'loss_pct': loss_pct
+            }
+        
+        # All clear
+        return {
+            'liquidate': False,
+            'severity': 'none',
+            'message': f'Loss levels acceptable: {loss_pct*100:.2f}%',
+            'loss_pct': loss_pct
+        }
         
         # Keep last 30 days of loss history
         old_dates = [d for d in self.daily_losses.keys() if (today - d).days > 30]

@@ -59,6 +59,13 @@ class ScheduledTaskHandlers:
             Execution summary
         """
         logger.info("🟢 Executing trading cycle...")
+        
+        # NEW: Check if we need to reset daily metrics (new trading day)
+        today = datetime.now().date()
+        if self.agent.last_reset_date is None or self.agent.last_reset_date.date() != today:
+            logger.info("📅 New trading day detected - resetting daily metrics")
+            self.agent.reset_daily_metrics()
+        
         try:
             self.agent.run_cycle()
             return {"status": "success", "task": "trading_cycle"}

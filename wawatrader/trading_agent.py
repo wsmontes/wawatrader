@@ -27,6 +27,7 @@ from wawatrader.llm_bridge import LLMBridge
 from wawatrader.risk_manager import get_risk_manager
 from wawatrader.market_intelligence import get_intelligence_engine
 from wawatrader.learning_engine import LearningEngine
+from wawatrader.position_manager import PositionManager
 from config.settings import settings
 
 
@@ -84,16 +85,37 @@ class TradingAgent:
         self.intelligence_engine = get_intelligence_engine()
         self.learning_engine = LearningEngine(self.alpaca)
         
+        # Initialize event-driven position manager (NEW)
+        self.position_manager = PositionManager(
+            alpaca_client=self.alpaca,
+            llm_bridge=self.llm_bridge,
+            trading_agent=self,
+            max_positions=10,
+            poll_interval=15  # Check prices every 15 seconds
+        )
+        
         # State tracking
         self.decisions: List[TradingDecision] = []
         self.positions: Dict[str, Any] = {}
+        self.position_entry_times: Dict[str, datetime] = {}  # Track when we entered each position
         self.account_value: float = 0
         self.current_pnl: float = 0
         self.active_decision_ids: Dict[str, str] = {}  # symbol -> decision_id for tracking outcomes
+        self.daily_start_value: float = 0  # Track starting value for daily loss limit
+        self.daily_trade_count: int = 0  # Track number of trades today
+        self.daily_traded_value: float = 0  # Track total value traded for turnover calc
+        self.last_reset_date: Optional[datetime] = None  # Track when we last reset daily metrics
         
         # Configuration
         self.min_confidence = settings.trading.min_confidence
         self.lookback_days = 90  # Historical data for indicators
+        
+        # TRADING CONSTRAINTS (to prevent overtrading)
+        self.MIN_HOLD_PERIOD = timedelta(hours=2)  # Must hold positions for at least 2 hours
+        self.MAX_DAILY_TRADES = 20  # Maximum trades per day
+        self.MAX_DAILY_LOSS_PCT = 0.01  # Stop trading if daily loss exceeds 1%
+        self.MAX_TURNOVER_RATIO = 3.0  # Stop if daily turnover > 300% of portfolio
+        self.MIN_EXPECTED_PROFIT = 50.0  # Minimum expected profit after costs ($)
         
         # Logging
         self.setup_logging()
@@ -116,6 +138,97 @@ class TradingAgent:
             level="INFO",
             filter=lambda record: "DECISION" in record["extra"]
         )
+    
+    def reset_daily_metrics(self):
+        """Reset daily tracking metrics at start of new trading day"""
+        today = datetime.now().date()
+        
+        if self.last_reset_date != today:
+            logger.info(f"🔄 Resetting daily metrics for {today}")
+            self.daily_start_value = self.account_value
+            self.daily_trade_count = 0
+            self.daily_traded_value = 0
+            self.last_reset_date = today
+    
+    def calculate_transaction_costs(self, shares: int, price: float) -> float:
+        """
+        Calculate estimated transaction costs for a trade.
+        
+        Includes:
+        - Commission: $2 per trade
+        - Slippage: $0.03 per share (market orders often get filled worse than mid-price)
+        - Bid-ask spread: $0.02 per share
+        
+        Args:
+            shares: Number of shares
+            price: Price per share
+            
+        Returns:
+            Total estimated cost ($)
+        """
+        commission = 2.0
+        slippage = shares * 0.03
+        spread = shares * 0.02
+        
+        total_cost = commission + slippage + spread
+        
+        logger.debug(f"Transaction costs for {shares} shares: Commission=${commission:.2f} + Slippage=${slippage:.2f} + Spread=${spread:.2f} = ${total_cost:.2f}")
+        
+        return total_cost
+    
+    def can_sell_position(self, symbol: str) -> tuple[bool, str]:
+        """
+        Check if we can sell a position based on hold period constraints.
+        
+        Args:
+            symbol: Stock symbol
+            
+        Returns:
+            (can_sell, reason) tuple
+        """
+        if symbol not in self.position_entry_times:
+            return True, "No entry time tracked (legacy position)"
+        
+        entry_time = self.position_entry_times[symbol]
+        time_held = datetime.now() - entry_time
+        
+        if time_held < self.MIN_HOLD_PERIOD:
+            remaining = self.MIN_HOLD_PERIOD - time_held
+            remaining_minutes = int(remaining.total_seconds() / 60)
+            return False, f"Position held only {int(time_held.total_seconds()/60)} minutes, need {remaining_minutes} more minutes (min hold: {self.MIN_HOLD_PERIOD.total_seconds()/3600:.1f} hours)"
+        
+        return True, f"Position held for {int(time_held.total_seconds()/3600):.1f} hours, OK to sell"
+    
+    def check_daily_limits(self) -> tuple[bool, str]:
+        """
+        Check if we've hit any daily trading limits.
+        
+        Returns:
+            (can_trade, reason) tuple
+        """
+        self.reset_daily_metrics()
+        
+        # Check daily trade count
+        if self.daily_trade_count >= self.MAX_DAILY_TRADES:
+            return False, f"Daily trade limit reached ({self.daily_trade_count}/{self.MAX_DAILY_TRADES})"
+        
+        # Check daily loss limit
+        if self.daily_start_value > 0:
+            daily_pnl = self.account_value - self.daily_start_value
+            daily_loss_pct = abs(daily_pnl / self.daily_start_value)
+            
+            if daily_pnl < 0 and daily_loss_pct > self.MAX_DAILY_LOSS_PCT:
+                return False, f"Daily loss limit exceeded ({daily_loss_pct*100:.2f}% > {self.MAX_DAILY_LOSS_PCT*100:.1f}%)"
+        
+        # Check turnover ratio
+        if self.account_value > 0:
+            turnover_ratio = self.daily_traded_value / self.account_value
+            
+            if turnover_ratio > self.MAX_TURNOVER_RATIO:
+                return False, f"Daily turnover limit exceeded ({turnover_ratio:.1f}x > {self.MAX_TURNOVER_RATIO:.1f}x)"
+        
+        return True, "All daily limits OK"
+
     
     def update_account_state(self):
         """Update account value, positions, and P&L"""
@@ -203,6 +316,11 @@ class TradingAgent:
             Analysis dict with indicators and LLM sentiment
         """
         logger.info(f"Analyzing {symbol}...")
+        
+        # NEW: Skip if position is managed by PositionManager (event-driven exits)
+        if symbol in self.position_manager.positions:
+            logger.debug(f"⏭️  Skipping {symbol}: managed by PositionManager")
+            return None
         
         # Step 1: Get market data
         bars = self.get_market_data(symbol)
@@ -311,6 +429,60 @@ class TradingAgent:
             logger.info(f"⏸️  {symbol}: HOLD - {reasoning}")
             return decision
         
+        # NEW: Validate action against position state (prevent LLM hallucinations)
+        if action == 'sell' and not current_position:
+            decision.risk_approved = False
+            decision.risk_reason = "Cannot SELL - no position exists (possible LLM error)"
+            logger.warning(f"❌ {symbol}: LLM recommended SELL but no position exists! Rejecting trade.")
+            return decision
+        
+        if action == 'buy' and current_position:
+            # We could allow adding to positions, but current strategy doesn't support it
+            logger.info(f"ℹ️  {symbol}: LLM recommended BUY but position already exists. Converting to HOLD.")
+            decision.action = 'hold'
+            decision.risk_approved = True
+            decision.risk_reason = "Position already exists, maintaining current holding"
+            return decision
+        
+        # NEW: Check daily trading limits before proceeding
+        can_trade, limit_reason = self.check_daily_limits()
+        if not can_trade:
+            decision.risk_approved = False
+            decision.risk_reason = f"Daily limit reached: {limit_reason}"
+            logger.warning(f"❌ {symbol}: {limit_reason}")
+            return decision
+        
+        # NEW: Check minimum hold period for SELL actions
+        if action == 'sell':
+            can_sell, hold_reason = self.can_sell_position(symbol)
+            if not can_sell:
+                decision.risk_approved = False
+                decision.risk_reason = f"Minimum hold period not met: {hold_reason}"
+                logger.warning(f"❌ {symbol}: {hold_reason}")
+                return decision
+        
+        # NEW: Calculate transaction costs and check profitability
+        est_costs = self.calculate_transaction_costs(shares, price)
+        trade_value = shares * price
+        
+        # For BUY: Only proceed if we expect profit > costs (use MIN_EXPECTED_PROFIT threshold)
+        if action == 'buy':
+            min_profit_needed = est_costs * 3  # Need 3x costs to justify trade
+            if min_profit_needed > trade_value * self.MIN_EXPECTED_PROFIT:
+                decision.risk_approved = False
+                decision.risk_reason = f"Expected profit too low. Est costs: ${est_costs:.2f}, min profit: ${min_profit_needed:.2f}"
+                logger.warning(f"❌ {symbol}: Trade costs (${est_costs:.2f}) too high relative to expected profit")
+                return decision
+        
+        # For SELL: Log the transaction costs but allow (we're closing position)
+        if action == 'sell':
+            logger.info(f"💰 {symbol}: Estimated transaction costs: ${est_costs:.2f}")
+            current_pnl_est = (price - current_position['avg_entry_price']) * shares - est_costs if current_position else 0
+            logger.info(f"💰 {symbol}: Estimated P&L after costs: ${current_pnl_est:.2f}")
+            logger.info(f"💰 {symbol}: Estimated transaction costs: ${est_costs:.2f}")
+            current_pnl_est = (price - current_position['avg_entry_price']) * shares - est_costs if current_position else 0
+            logger.info(f"💰 {symbol}: Estimated P&L after costs: ${current_pnl_est:.2f}")
+        
         # Validate with risk manager
         risk_result = self.risk_manager.validate_trade(
             symbol=symbol,
@@ -328,7 +500,7 @@ class TradingAgent:
         if not risk_result.approved:
             logger.warning(f"❌ {symbol}: Risk check failed - {risk_result.reason}")
         else:
-            logger.info(f"✅ {symbol}: {action.upper()} {shares} shares @ ${price:.2f} (confidence: {confidence}%)")
+            logger.info(f"✅ {symbol}: {action.upper()} {shares} shares @ ${price:.2f} (confidence: {confidence}%, est costs: ${est_costs:.2f})")
         
         # NEW: Record decision in learning engine (for learning and pattern discovery)
         try:
@@ -394,6 +566,11 @@ class TradingAgent:
             logger.debug(f"Skipping execution - not approved: {decision.risk_reason}")
             return
         
+        # Skip execution if shares is 0 (e.g., trying to sell non-existent position)
+        if decision.shares == 0:
+            logger.debug(f"Skipping execution for {decision.symbol} - 0 shares (likely no position to sell)")
+            return
+        
         if decision.action == 'hold':
             logger.debug("No execution needed for HOLD action")
             return
@@ -444,6 +621,65 @@ class TradingAgent:
                     decision.shares,
                     final_order['filled_avg_price']
                 )
+                
+                # NEW: Track entry time for position holds
+                if decision.action == 'buy':
+                    self.position_entry_times[decision.symbol] = datetime.now()
+                    logger.debug(f"📍 Recorded entry time for {decision.symbol}")
+                    
+                    # NEW: Hand position to PositionManager for event-driven monitoring
+                    try:
+                        analysis = {
+                            'signals': decision.indicators,
+                            'llm_analysis': decision.llm_analysis,
+                        }
+                        self.position_manager.add_position(
+                            symbol=decision.symbol,
+                            entry_price=final_order['filled_avg_price'],
+                            shares=decision.shares,
+                            analysis=analysis
+                        )
+                        logger.info(f"✅ Position handed to PositionManager for monitoring")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to add position to PositionManager: {e}")
+                        
+                elif decision.action == 'sell':
+                    # Remove entry time when position is closed
+                    if decision.symbol in self.position_entry_times:
+                        entry_time = self.position_entry_times[decision.symbol]
+                        hold_duration = datetime.now() - entry_time
+                        logger.info(f"⏱️  {decision.symbol}: Held for {hold_duration}")
+                        del self.position_entry_times[decision.symbol]
+                
+                # NEW: Update daily metrics
+                self.daily_trade_count += 1
+                self.daily_traded_value += decision.shares * final_order['filled_avg_price']
+                logger.debug(f"📊 Daily metrics: {self.daily_trade_count} trades, ${self.daily_traded_value:,.2f} traded")
+                
+                # CRITICAL: Update positions immediately after trade execution
+                # This ensures subsequent trades in the same cycle see accurate position data
+                if decision.action == 'sell':
+                    # Remove position after selling
+                    if decision.symbol in self.positions:
+                        del self.positions[decision.symbol]
+                        logger.debug(f"Updated positions: removed {decision.symbol}")
+                elif decision.action == 'buy':
+                    # Refresh positions from API to get accurate new position
+                    # (We could try to update locally, but API is source of truth)
+                    try:
+                        updated_positions = self.alpaca.get_positions()
+                        self.positions = {pos['symbol']: pos for pos in updated_positions}
+                        logger.debug(f"Updated positions: refreshed from API ({len(self.positions)} positions)")
+                    except Exception as e:
+                        logger.warning(f"Failed to refresh positions after buy: {e}")
+                
+                # Also update account value to reflect new equity after trade
+                try:
+                    account = self.alpaca.get_account()
+                    self.account_value = float(account['equity'])
+                    logger.debug(f"Updated account value: ${self.account_value:,.2f}")
+                except Exception as e:
+                    logger.warning(f"Failed to refresh account value: {e}")
             else:
                 decision.executed = False
                 status = final_order['status'] if final_order else 'unknown'
@@ -531,6 +767,73 @@ class TradingAgent:
         except Exception as e:
             logger.error(f"❌ Error recording trade outcome: {e}")
     
+    def _emergency_liquidate_all(self):
+        """
+        Emergency liquidation of all positions due to excessive losses.
+        
+        This bypasses normal LLM decision-making and sells everything immediately.
+        Only called when daily loss limit is reached or nearly reached.
+        """
+        logger.error("🚨 INITIATING EMERGENCY LIQUIDATION")
+        logger.error(f"   Current positions: {len(self.positions)}")
+        
+        if not self.positions:
+            logger.info("   No positions to liquidate")
+            return
+        
+        liquidated = 0
+        failed = 0
+        
+        for symbol, position in list(self.positions.items()):
+            try:
+                qty = abs(int(float(position['qty'])))
+                if qty == 0:
+                    continue
+                
+                logger.error(f"   🔥 LIQUIDATING: {symbol} ({qty} shares)")
+                
+                # Place market sell order
+                order = self.alpaca.place_market_order(
+                    symbol=symbol,
+                    qty=qty,
+                    side='sell'
+                )
+                
+                if order:
+                    # Wait for fill
+                    final_order = self.alpaca.wait_for_order_fill(
+                        order_id=order['id'],
+                        timeout_seconds=30
+                    )
+                    
+                    if final_order and final_order['status'] == 'filled':
+                        logger.error(f"   ✅ {symbol} liquidated @ ${final_order['filled_avg_price']:.2f}")
+                        liquidated += 1
+                        
+                        # Update positions immediately
+                        if symbol in self.positions:
+                            del self.positions[symbol]
+                    else:
+                        logger.error(f"   ❌ {symbol} liquidation failed (order not filled)")
+                        failed += 1
+                else:
+                    logger.error(f"   ❌ {symbol} liquidation failed (order placement failed)")
+                    failed += 1
+                    
+            except Exception as e:
+                logger.error(f"   ❌ Error liquidating {symbol}: {e}")
+                failed += 1
+        
+        logger.error("="*60)
+        logger.error(f"🚨 EMERGENCY LIQUIDATION COMPLETE")
+        logger.error(f"   Liquidated: {liquidated} positions")
+        logger.error(f"   Failed: {failed} positions")
+        logger.error(f"   Trading halted for today")
+        logger.error("="*60)
+        
+        # Update account state after liquidation
+        self.update_account_state()
+    
     def log_decision(self, decision: TradingDecision):
         """
         Log trading decision to both file and memory
@@ -576,6 +879,25 @@ class TradingAgent:
         
         # Update account state
         self.update_account_state()
+        
+        # CRITICAL: Check for emergency liquidation before normal trading
+        liquidation_check = self.risk_manager.check_emergency_liquidation(
+            current_pnl=self.current_pnl,
+            account_value=self.account_value
+        )
+        
+        if liquidation_check['liquidate']:
+            logger.error("="*60)
+            logger.error(f"🚨 EMERGENCY LIQUIDATION IN PROGRESS")
+            logger.error(f"   Reason: {liquidation_check['message']}")
+            logger.error(f"   Loss: {liquidation_check['loss_pct']*100:.2f}%")
+            logger.error("="*60)
+            
+            # Liquidate all positions immediately
+            self._emergency_liquidate_all()
+            return
+        elif liquidation_check['severity'] == 'warning':
+            logger.warning(f"⚠️ {liquidation_check['message']}")
         
         # Check market status with detailed information
         try:
@@ -820,6 +1142,31 @@ class TradingAgent:
         except Exception as e:
             logger.error(f"❌ Fatal error in intelligent scheduler: {e}")
             raise
+    
+    def start_position_monitoring(self):
+        """Start the PositionManager background monitoring"""
+        try:
+            self.position_manager.start()
+            logger.info("✅ PositionManager monitoring started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start PositionManager: {e}")
+    
+    def stop_position_monitoring(self):
+        """Stop the PositionManager background monitoring"""
+        try:
+            self.position_manager.stop()
+            logger.info("🛑 PositionManager monitoring stopped")
+        except Exception as e:
+            logger.error(f"❌ Failed to stop PositionManager: {e}")
+    
+    def set_market_close_time(self, close_time: datetime):
+        """
+        Set market close time for PositionManager safety checks.
+        
+        Args:
+            close_time: Time to consider market close (e.g., 3:30 PM EST for 30-min buffer)
+        """
+        self.position_manager.set_market_close_time(close_time)
     
     def get_statistics(self) -> Dict[str, Any]:
         """
