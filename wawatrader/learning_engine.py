@@ -555,3 +555,96 @@ Best/Worst:
             'best_indicator': None,
             'worst_indicator': None
         }
+    
+    def generate_morning_insights(self) -> Dict[str, Any]:
+        """
+        Generate morning insights for LLM context.
+        
+        This creates a structured summary of:
+        - Yesterday's performance
+        - Discovered patterns (last 30 days)
+        - Lessons learned
+        - Focus areas for today
+        
+        Returns:
+            Dictionary with insights data for LearningInsightsComponent
+        """
+        try:
+            logger.info("🌅 Generating morning insights...")
+            
+            # Get yesterday's performance
+            yesterday = datetime.now().date() - timedelta(days=1)
+            yesterday_perf = self.analyze_daily_performance(yesterday)
+            
+            # Get recent patterns
+            patterns = self.discover_patterns(lookback_days=30)
+            
+            # Extract focus areas based on patterns and lessons
+            focus_areas = []
+            
+            # Focus on profitable times
+            time_patterns = [p for p in patterns if p.get('pattern_type') == 'time_of_day']
+            if time_patterns:
+                best_time = time_patterns[0]
+                focus_areas.append(f"Look for {best_time['conditions']} opportunities")
+            
+            # Focus on winning market regimes
+            regime_patterns = [p for p in patterns if p.get('pattern_type') == 'market_regime']
+            if regime_patterns:
+                best_regime = regime_patterns[0]
+                focus_areas.append(f"Current {best_regime['conditions']} conditions favor your strategy")
+            
+            # Add confidence-based guidance
+            confidence_patterns = [p for p in patterns if p.get('pattern_type') == 'confidence_level']
+            if confidence_patterns:
+                best_conf = confidence_patterns[0]
+                focus_areas.append(best_conf.get('recommendation', ''))
+            
+            # If yesterday had losses, add caution
+            if yesterday_perf.get('total_pnl', 0) < 0:
+                focus_areas.append("Exercise caution - review yesterday's losses before trading")
+            
+            # Build insights structure
+            insights = {
+                'yesterday': {
+                    'date': yesterday.isoformat(),
+                    'total_trades': yesterday_perf.get('total_trades', 0),
+                    'winning_trades': yesterday_perf.get('winning_trades', 0),
+                    'losing_trades': yesterday_perf.get('losing_trades', 0),
+                    'win_rate': yesterday_perf.get('win_rate', 0),
+                    'total_pnl': yesterday_perf.get('total_pnl', 0),
+                    'best_trade': yesterday_perf.get('best_trade', 0),
+                    'worst_trade': yesterday_perf.get('worst_trade', 0)
+                },
+                'patterns': patterns[:5],  # Top 5 patterns
+                'lessons': yesterday_perf.get('lessons_learned', [])[:5],  # Top 5 lessons
+                'focus_areas': focus_areas[:5]  # Top 5 focus areas
+            }
+            
+            logger.info("✅ Morning insights generated")
+            logger.info(f"   Yesterday: {yesterday_perf.get('total_trades', 0)} trades, "
+                       f"{yesterday_perf.get('win_rate', 0):.1%} win rate, "
+                       f"${yesterday_perf.get('total_pnl', 0):+.2f} P&L")
+            logger.info(f"   Patterns: {len(patterns)} discovered")
+            logger.info(f"   Focus areas: {len(focus_areas)}")
+            
+            return insights
+            
+        except Exception as e:
+            logger.error(f"❌ Error generating morning insights: {e}")
+            # Return empty insights structure
+            return {
+                'yesterday': {
+                    'date': (datetime.now().date() - timedelta(days=1)).isoformat(),
+                    'total_trades': 0,
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'win_rate': 0,
+                    'total_pnl': 0,
+                    'best_trade': 0,
+                    'worst_trade': 0
+                },
+                'patterns': [],
+                'lessons': [],
+                'focus_areas': []
+            }

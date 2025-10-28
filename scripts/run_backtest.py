@@ -22,14 +22,40 @@ from loguru import logger
 def main():
     """Run a sample backtest"""
     
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Run backtest on historical data')
+    parser.add_argument('--symbols', type=str, help='Comma-separated list of symbols (e.g., AAPL,MSFT)')
+    parser.add_argument('--start', type=str, default='2024-01-01', help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--end', type=str, default='2024-12-31', help='End date (YYYY-MM-DD)')
+    parser.add_argument('--capital', type=float, default=100000, help='Initial capital')
+    
+    args = parser.parse_args()
+    
     logger.info("WawaTrader Backtest Example")
     logger.info("=" * 60)
     
-    # Configuration
-    symbols = ["AAPL"]  # Start with one symbol
-    start_date = "2024-01-01"
-    end_date = "2024-12-31"
-    initial_capital = 100000
+    # Get symbols
+    if args.symbols:
+        symbols = [s.strip().upper() for s in args.symbols.split(',')]
+    else:
+        # Let LLM discover interesting symbols for backtesting
+        from wawatrader.market_intelligence import MarketIntelligence
+        logger.info("🤖 No symbols provided - LLM will discover trending symbols...")
+        
+        try:
+            intel = MarketIntelligence()
+            universe = intel.get_dynamic_universe(min_mentions=5, max_results=10)
+            symbols = [stock['symbol'] for stock in universe[:5]]  # Top 5 for backtest
+            logger.info(f"🧠 Selected {len(symbols)} trending symbols: {', '.join(symbols)}")
+        except Exception as e:
+            logger.warning(f"Failed to get dynamic symbols: {e}")
+            logger.info("📋 Provide symbols with --symbols flag (e.g., --symbols AAPL,MSFT)")
+            return
+    
+    start_date = args.start
+    end_date = args.end
+    initial_capital = args.capital
     
     logger.info(f"Symbols: {', '.join(symbols)}")
     logger.info(f"Period: {start_date} to {end_date}")

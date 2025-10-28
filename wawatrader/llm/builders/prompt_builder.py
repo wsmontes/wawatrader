@@ -21,6 +21,7 @@ from ..components.data import (
 )
 from ..components.instructions import TaskInstructionComponent, ResponseFormatComponent
 from ..components.overnight import OvernightAnalysisComponent
+from ..components.learning import LearningInsightsComponent
 from ..profiles.base_profile import TradingProfileComponent
 
 
@@ -136,6 +137,11 @@ class PromptBuilder:
         components.append(TradingProfileComponent(context.profile))
         
         # === CONDITIONALLY INCLUDE DATA COMPONENTS ===
+        
+        # Learning insights (if available) - HIGHEST PRIORITY
+        # Show this FIRST so LLM learns from past performance
+        if context.learning_insights:
+            components.append(LearningInsightsComponent(context.learning_insights))
         
         # Overnight analysis (if available) - HIGH PRIORITY
         # Show this BEFORE technical data so LLM sees deep analysis first

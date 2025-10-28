@@ -90,6 +90,7 @@ class ModularLLMAnalyzer:
         profile: str = 'moderate',
         trigger: str = QueryContext.SCHEDULED_CYCLE,
         overnight_context: Optional[Dict[str, Any]] = None,
+        learning_insights: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Analyze a NEW trading opportunity (not currently held).
@@ -101,6 +102,7 @@ class ModularLLMAnalyzer:
             profile: Trading profile (conservative, moderate, aggressive, rotator, etc.)
             trigger: What triggered this analysis
             overnight_context: Optional overnight deep analysis results
+            learning_insights: Optional learning insights from past performance
         
         Returns:
             Parsed LLM analysis with action recommendation
@@ -113,6 +115,7 @@ class ModularLLMAnalyzer:
             include_news=bool(news),
             expected_format=QueryContext.STANDARD_DECISION,
             overnight_analysis=overnight_context,
+            learning_insights=learning_insights,
         )
         
         data = {
@@ -132,6 +135,7 @@ class ModularLLMAnalyzer:
         profile: str = 'moderate',
         news: Optional[List[Dict[str, Any]]] = None,
         overnight_context: Optional[Dict[str, Any]] = None,
+        learning_insights: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Analyze an EXISTING position for SELL/HOLD decision.
@@ -148,6 +152,7 @@ class ModularLLMAnalyzer:
             profile: Trading profile
             news: Optional news
             overnight_context: Optional overnight deep analysis results
+            learning_insights: Optional learning insights from past performance
         
         Returns:
             Parsed LLM analysis with SELL/HOLD/BUY recommendation
@@ -160,6 +165,7 @@ class ModularLLMAnalyzer:
             include_news=bool(news),
             expected_format=QueryContext.STANDARD_DECISION,
             overnight_analysis=overnight_context,
+            learning_insights=learning_insights,
         )
         
         data = {

@@ -36,7 +36,14 @@ class TechnicalDataComponent(PromptComponent):
         return self._standard_format()
     
     def _standard_format(self) -> str:
-        """Standard technical analysis format"""
+        """
+        Standard technical analysis format with professional trading context.
+        
+        Enhanced with trading master knowledge:
+        - Explains WHAT indicators mean
+        - Shows HOW professionals use them
+        - Provides ACTIONABLE context for decisions
+        """
         # Handle both nested and flat data structures
         signals = self.data
         
@@ -62,109 +69,285 @@ class TechnicalDataComponent(PromptComponent):
         symbol = self.context.primary_symbol if self.context else 'UNKNOWN'
         
         output = f"""
-📊 TECHNICAL DATA: {symbol}
+📊 TECHNICAL ANALYSIS: {symbol}
 {'=' * 70}
-💰 Price: ${current_price:.2f}
+Current Price: ${current_price:.2f}
+
+🎯 TREND ANALYSIS (Mark Minervini: "Trade with the trend")
+{'─' * 70}
 """
         
-        # Trend analysis
+        # Trend analysis with professional context
         sma_20 = trend_data.get('sma20') or trend_data.get('sma_20', 0)
         sma_50 = trend_data.get('sma50') or trend_data.get('sma_50', 0)
+        vwap = signals.get('vwap', current_price)
+        
+        # Calculate distances for context
+        distance_from_20sma = ((current_price - sma_20) / sma_20 * 100) if sma_20 > 0 else 0
+        distance_from_vwap = ((current_price - vwap) / vwap * 100) if vwap > 0 else 0
         
         if current_price > sma_20 > sma_50:
-            trend_emoji = '📈'
-            trend_text = 'BULLISH TREND (strong - price > SMA20 > SMA50)'
+            output += '📈 PRIMARY TREND: BULLISH (Stage 2 uptrend)\n'
+            output += f'   Price: ${current_price:.2f} (+{distance_from_20sma:.1f}% above 20 SMA)\n'
+            output += f'   SMA20: ${sma_20:.2f} (short-term support)\n'
+            output += f'   SMA50: ${sma_50:.2f} (long-term support)\n'
+            output += '   ✓ SEPA confirmed: Price > SMA20 > SMA50\n'
+            output += '   → Professional Action: Favor longs, buy pullbacks to 20 SMA\n'
         elif current_price > sma_20:
-            trend_emoji = '📈'
-            trend_text = 'BULLISH TREND (price above SMA20 - trend confirmed)'
+            output += '📈 PRIMARY TREND: BULLISH (emerging)\n'
+            output += f'   Price: ${current_price:.2f} (+{distance_from_20sma:.1f}% above 20 SMA)\n'
+            output += f'   SMA20: ${sma_20:.2f}, SMA50: ${sma_50:.2f}\n'
+            output += '   ⚠️ Note: 20 SMA not yet above 50 SMA (trend early stage)\n'
+            output += '   → Professional Action: Can buy but watch for confirmation\n'
         elif current_price < sma_20 < sma_50:
-            trend_emoji = '📉'
-            trend_text = 'BEARISH TREND (weak - price < SMA20 < SMA50)'
+            output += '📉 PRIMARY TREND: BEARISH (Stage 4 downtrend)\n'
+            output += f'   Price: ${current_price:.2f} ({distance_from_20sma:.1f}% below 20 SMA)\n'
+            output += f'   SMA20: ${sma_20:.2f} (resistance)\n'
+            output += f'   SMA50: ${sma_50:.2f} (major resistance)\n'
+            output += '   ✗ Price < SMA20 < SMA50 (confirmed downtrend)\n'
+            output += '   → Professional Action: Avoid longs, consider shorts\n'
         elif current_price < sma_20:
-            trend_emoji = '📉'
-            trend_text = 'BEARISH TREND (price below SMA20 - downtrend confirmed)'
+            output += '📉 PRIMARY TREND: BEARISH or CORRECTING\n'
+            output += f'   Price: ${current_price:.2f} ({distance_from_20sma:.1f}% below 20 SMA)\n'
+            output += f'   SMA20: ${sma_20:.2f} (resistance), SMA50: ${sma_50:.2f}\n'
+            output += '   ⚠️ Price below key support - weakness confirmed\n'
+            output += '   → Professional Action: Stay cautious, wait for reversal\n'
         else:
-            trend_emoji = '➡️'
-            trend_text = 'NEUTRAL TREND (consolidating)'
+            output += '➡️ PRIMARY TREND: CONSOLIDATING\n'
+            output += f'   Price: ${current_price:.2f}\n'
+            output += f'   SMA20: ${sma_20:.2f}, SMA50: ${sma_50:.2f}\n'
+            output += '   ⚪ Sideways action - no clear trend direction\n'
+            output += '   → Professional Action: Wait for breakout or breakdown\n'
         
-        output += f"{trend_emoji} {trend_text}\n"
-        output += f"   SMA20: ${sma_20:.2f}, SMA50: ${sma_50:.2f}\n\n"
-        
-        # Momentum
-        rsi = momentum_data.get('rsi', 50) if isinstance(momentum_data, dict) else 50
-        if rsi > 75:
-            momentum_text = "EXTREMELY OVERBOUGHT (caution - potential pullback)"
-            momentum_emoji = "🔴"
-        elif rsi > 70:
-            momentum_text = "OVERBOUGHT (consider waiting for better entry)"
-            momentum_emoji = "🟠"
-        elif rsi < 25:
-            momentum_text = "EXTREMELY OVERSOLD (potential bounce opportunity)"
-            momentum_emoji = "🟢"
-        elif rsi < 30:
-            momentum_text = "OVERSOLD (potential reversal setup)"
-            momentum_emoji = "🟡"
-        elif 45 <= rsi <= 55:
-            momentum_text = "NEUTRAL (no extreme momentum)"
-            momentum_emoji = "⚪"
-        elif rsi > 55:
-            momentum_text = "POSITIVE MOMENTUM (bullish bias)"
-            momentum_emoji = "🟢"
+        # VWAP Analysis (Andrew Aziz methodology)
+        output += f'\n💎 VWAP: ${vwap:.2f} ({distance_from_vwap:+.1f}% from price)\n'
+        if abs(distance_from_vwap) < 0.5:
+            output += '   → At VWAP: Institutional pivot point (key decision level)\n'
+        elif distance_from_vwap > 2:
+            output += '   → Extended above VWAP: Overbought, watch for mean reversion\n'
+        elif distance_from_vwap < -2:
+            output += '   → Extended below VWAP: Oversold, potential bounce setup\n'
+        elif distance_from_vwap > 0:
+            output += '   → Above VWAP: Bulls in control, VWAP acting as support\n'
         else:
-            momentum_text = "NEGATIVE MOMENTUM (bearish bias)"
-            momentum_emoji = "🔴"
+            output += '   → Below VWAP: Bears in control, VWAP acting as resistance\n'
         
-        output += f"{momentum_emoji} RSI: {rsi:.1f} ({momentum_text})\n"
-        
-        # MACD if available
+        # MACD trend confirmation
         macd_line = momentum_data.get('macd')
         signal_line = momentum_data.get('macd_signal')
         if macd_line is not None and signal_line is not None:
-            if macd_line > signal_line:
-                output += f"📊 MACD: Bullish (MACD {macd_line:.2f} > Signal {signal_line:.2f})\n"
+            output += f'\n📊 MACD: {macd_line:.3f} / Signal: {signal_line:.3f}\n'
+            if macd_line > signal_line and macd_line > 0:
+                output += '   ✓ Bullish: MACD above signal AND above zero (strong uptrend)\n'
+            elif macd_line > signal_line:
+                output += '   → Bullish crossover but below zero (early reversal signal)\n'
+            elif macd_line < signal_line and macd_line < 0:
+                output += '   ✗ Bearish: MACD below signal AND below zero (strong downtrend)\n'
             else:
-                output += f"📊 MACD: Bearish (MACD {macd_line:.2f} < Signal {signal_line:.2f})\n"
+                output += '   → Bearish crossover but above zero (potential pullback)\n'
         
-        # Volume
-        vol_ratio = volume_data.get('ratio') or volume_data.get('volume_ratio', 1.0)
-        if vol_ratio > 2.0:
-            vol_text = "VERY HIGH volume (strong conviction)"
-            vol_emoji = "🔥"
-        elif vol_ratio > 1.5:
-            vol_text = "HIGH volume (good confirmation)"
-            vol_emoji = "📈"
-        elif vol_ratio > 1.2:
-            vol_text = "ABOVE AVERAGE volume (modest confirmation)"
-            vol_emoji = "📊"
-        elif vol_ratio < 0.7:
-            vol_text = "LOW volume (weak conviction - be cautious)"
-            vol_emoji = "⚠️"
+        output += f'\n⚡ MOMENTUM ANALYSIS (Al Brooks: "Every bar tells a story")\n'
+        output += '─' * 70 + '\n'
+        
+        # RSI with professional context
+        rsi = momentum_data.get('rsi', 50) if isinstance(momentum_data, dict) else 50
+        if rsi > 80:
+            output += f'🔴 RSI: {rsi:.1f} - EXTREMELY OVERBOUGHT\n'
+            output += '   → Ross Cameron: "Don\'t chase parabolic moves"\n'
+            output += '   → Action: Wait for pullback OR tight stop if entering\n'
+        elif rsi > 70:
+            output += f'🟠 RSI: {rsi:.1f} - OVERBOUGHT (cautionary zone)\n'
+            output += '   → Mark Douglas: "Overbought can stay overbought in strong trends"\n'
+            output += '   → Action: Check trend strength - may continue if volume confirms\n'
+        elif rsi > 60:
+            output += f'🟢 RSI: {rsi:.1f} - STRONG BULLISH MOMENTUM\n'
+            output += '   → Sweet spot for momentum trades (not overbought yet)\n'
+            output += '   → Action: Favorable for new longs if trend aligned\n'
+        elif rsi < 20:
+            output += f'🟢 RSI: {rsi:.1f} - EXTREMELY OVERSOLD\n'
+            output += '   → Andrew Aziz: "Look for reversal setups at support"\n'
+            output += '   → Action: Watch for bounce if at key support level\n'
+        elif rsi < 30:
+            output += f'🟡 RSI: {rsi:.1f} - OVERSOLD (reversal potential)\n'
+            output += '   → Al Brooks: "Look for bullish reversal bars"\n'
+            output += '   → Action: Cautiously bullish if support holds\n'
+        elif rsi < 40:
+            output += f'🔴 RSI: {rsi:.1f} - WEAK MOMENTUM (bearish bias)\n'
+            output += '   → Momentum favors bears - be selective on longs\n'
+            output += '   → Action: Wait for momentum shift or trade with trend\n'
+        elif 45 <= rsi <= 55:
+            output += f'⚪ RSI: {rsi:.1f} - NEUTRAL (balanced)\n'
+            output += '   → No momentum edge - rely on trend and volume\n'
+            output += '   → Action: Wait for clearer signal\n'
         else:
-            vol_text = "NORMAL volume"
-            vol_emoji = "📊"
+            output += f'📊 RSI: {rsi:.1f} - MODERATE MOMENTUM\n'
+            output += '   → Healthy momentum within normal range\n'
+            output += '   → Action: Safe zone for trades aligned with trend\n'
         
-        output += f"{vol_emoji} Volume: {vol_ratio:.2f}x average ({vol_text})\n"
+        # Volume Analysis (Professional conviction indicator)
+        output += f'\n� VOLUME ANALYSIS (Peter Brandt: "Volume confirms price action")\n'
+        output += '─' * 70 + '\n'
+        vol_ratio = volume_data.get('ratio') or volume_data.get('volume_ratio', 1.0)
+        if vol_ratio > 3.0:
+            output += f'🔥 Volume: {vol_ratio:.2f}x average - EXPLOSIVE\n'
+            output += '   → Ross Cameron: "Big volume = institutions are moving"\n'
+            output += '   → Action: High conviction signal - respect the move\n'
+        elif vol_ratio > 2.0:
+            output += f'🔥 Volume: {vol_ratio:.2f}x average - VERY HIGH\n'
+            output += '   → Strong institutional participation\n'
+            output += '   → Action: Confirms price action - trades have conviction\n'
+        elif vol_ratio > 1.5:
+            output += f'📈 Volume: {vol_ratio:.2f}x average - ELEVATED\n'
+            output += '   → Above-average interest, good confirmation\n'
+            output += '   → Action: Reliable signal - institutions are engaged\n'
+        elif vol_ratio > 1.2:
+            output += f'📊 Volume: {vol_ratio:.2f}x average - SLIGHTLY ELEVATED\n'
+            output += '   → Modest confirmation of price move\n'
+            output += '   → Action: Acceptable but watch for follow-through\n'
+        elif vol_ratio < 0.5:
+            output += f'💤 Volume: {vol_ratio:.2f}x average - VERY LOW\n'
+            output += '   → Lack of conviction - retail-only action\n'
+            output += '   → Action: CAUTION - moves may not hold without volume\n'
+        elif vol_ratio < 0.7:
+            output += f'⚠️ Volume: {vol_ratio:.2f}x average - LOW\n'
+            output += '   → Weak participation - questionable move validity\n'
+            output += '   → Action: Be skeptical of breakouts without volume\n'
+        else:
+            output += f'📊 Volume: {vol_ratio:.2f}x average - NORMAL\n'
+            output += '   → Average institutional participation\n'
+            output += '   → Action: Neither confirms nor denies - use other signals\n'
         
-        # Volatility
+        # Volatility & Risk Assessment
         volatility = signals.get('volatility', {})
         atr = volatility.get('atr', 0)
         if atr:
             atr_pct = (atr / current_price * 100) if current_price > 0 else 0
-            output += f"📏 ATR: ${atr:.2f} ({atr_pct:.1f}% of price)\n"
+            output += f'\n🎲 VOLATILITY & RISK (Van Tharp: "Size your positions based on volatility")\n'
+            output += '─' * 70 + '\n'
+            output += f'ATR: ${atr:.2f} ({atr_pct:.1f}% of price)\n'
+            
+            if atr_pct > 5:
+                output += '   → HIGH volatility - Use smaller position sizes\n'
+                output += '   → Action: Wide stops required, reduce share count\n'
+            elif atr_pct > 3:
+                output += '   → MODERATE volatility - Standard position sizing\n'
+                output += '   → Action: Normal risk management applies\n'
+            else:
+                output += '   → LOW volatility - Can use larger positions\n'
+                output += '   → Action: Tighter stops possible, may increase size\n'
         
-        # Bollinger Bands
+        # Bollinger Bands - Volatility context
         bb_width = volatility.get('bb_width', 0)
+        bb_upper = signals.get('bb_upper', 0)
+        bb_lower = signals.get('bb_lower', 0)
+        
         if bb_width:
             if bb_width < 0.05:
-                bb_text = "VERY LOW volatility - potential breakout pending"
+                output += f'\n📊 Bollinger Bands: SQUEEZE (width: {bb_width:.3f})\n'
+                output += '   → John Bollinger: "Quiet precedes activity"\n'
+                output += '   → Action: Expect breakout soon - watch for volume surge\n'
             elif bb_width < 0.10:
-                bb_text = "LOW volatility - consolidating"
+                output += f'\n📊 Bollinger Bands: CONTRACTING (width: {bb_width:.3f})\n'
+                output += '   → Consolidation phase - building energy\n'
+                output += '   → Action: Prepare for potential breakout\n'
             elif bb_width > 0.20:
-                bb_text = "HIGH volatility - trending strongly"
+                output += f'\n📊 Bollinger Bands: EXPANDING (width: {bb_width:.3f})\n'
+                output += '   → Strong trend in motion - high volatility\n'
+                output += '   → Action: Trend trades favored, use wider stops\n'
             else:
-                bb_text = "NORMAL volatility"
-            
-            output += f"📊 Bollinger Bands: {bb_text} (width: {bb_width:.2f})\n"
+                output += f'\n📊 Bollinger Bands: NORMAL (width: {bb_width:.3f})\n'
+        
+        # Price position within Bollinger Bands
+        if bb_upper > 0 and bb_lower > 0:
+            bb_position = (current_price - bb_lower) / (bb_upper - bb_lower) * 100
+            if bb_position > 90:
+                output += f'   Price at {bb_position:.0f}% of BB range (near upper band)\n'
+                output += '   → Overbought per BB - watch for pullback\n'
+            elif bb_position < 10:
+                output += f'   Price at {bb_position:.0f}% of BB range (near lower band)\n'
+                output += '   → Oversold per BB - potential bounce\n'
+            else:
+                output += f'   Price at {bb_position:.0f}% of BB range\n'
+        
+        # Professional Trading Context Summary
+        output += f'\n🎯 PROFESSIONAL TRADING CONTEXT\n'
+        output += '─' * 70 + '\n'
+        
+        # Determine primary pattern
+        if current_price > sma_20 > sma_50 and rsi > 60 and vol_ratio > 1.5:
+            output += '✅ PATTERN: Strong Uptrend with Momentum\n'
+            output += '   Methodology: Mark Minervini SEPA + Ross Cameron Momentum\n'
+            output += '   → BUY opportunities on pullbacks to SMA20\n'
+            output += '   → Favor aggressive entries with volume confirmation\n'
+        elif current_price > vwap and abs(distance_from_vwap) < 2 and vol_ratio > 1.3:
+            output += '✅ PATTERN: VWAP Support Setup\n'
+            output += '   Methodology: Andrew Aziz VWAP Strategy\n'
+            output += '   → Enter on dips to VWAP with volume\n'
+            output += '   → Stop below VWAP, target previous high\n'
+        elif rsi < 30 and abs(distance_from_20sma) < 1:
+            output += '⚠️ PATTERN: Oversold Bounce Setup\n'
+            output += '   Methodology: Al Brooks Support Bounce\n'
+            output += '   → Watch for reversal candle at support\n'
+            output += '   → Conservative entry with tight stop\n'
+        elif vol_ratio > 2.5 and rsi > 50:
+            output += '🔥 PATTERN: Momentum Surge\n'
+            output += '   Methodology: Ross Cameron Momentum Scalp\n'
+            output += '   → Quick entry on volume spike\n'
+            output += '   → Take profits fast (1-2%), don\'t overstay\n'
+        elif bb_width < 0.05:
+            output += '⏳ PATTERN: Volatility Squeeze\n'
+            output += '   Methodology: John Bollinger Squeeze Play\n'
+            output += '   → Wait for breakout with volume\n'
+            output += '   → Enter in direction of breakout\n'
+        elif current_price < sma_20 < sma_50:
+            output += '🔴 PATTERN: Confirmed Downtrend\n'
+            output += '   → Avoid new longs, consider shorts\n'
+            output += '   → Wait for trend reversal before entering\n'
+        else:
+            output += '➡️ PATTERN: Consolidation / Mixed Signals\n'
+            output += '   → No clear pattern - wait for better setup\n'
+            output += '   → Require multiple confirmations before entry\n'
+        
+        output += '\n� KEY DECISION FACTORS:\n'
+        
+        # List what's working in favor
+        bullish_factors = []
+        bearish_factors = []
+        
+        if current_price > sma_20 > sma_50:
+            bullish_factors.append('SEPA uptrend confirmed')
+        elif current_price < sma_20 < sma_50:
+            bearish_factors.append('SEPA downtrend confirmed')
+        
+        if rsi > 60 and rsi < 75:
+            bullish_factors.append('Strong but not overbought momentum')
+        elif rsi < 30:
+            bullish_factors.append('Oversold - potential bounce')
+        elif rsi > 75:
+            bearish_factors.append('Overbought - potential pullback')
+        
+        if vol_ratio > 1.5:
+            bullish_factors.append('Strong volume confirmation')
+        elif vol_ratio < 0.7:
+            bearish_factors.append('Weak volume - lack of conviction')
+        
+        if current_price > vwap:
+            bullish_factors.append('Price above VWAP (bulls in control)')
+        else:
+            bearish_factors.append('Price below VWAP (bears in control)')
+        
+        if bullish_factors:
+            output += '   BULLISH:\n'
+            for factor in bullish_factors:
+                output += f'   ✓ {factor}\n'
+        
+        if bearish_factors:
+            output += '   BEARISH:\n'
+            for factor in bearish_factors:
+                output += f'   ✗ {factor}\n'
+        
+        if not bullish_factors and not bearish_factors:
+            output += '   → No strong factors either way (neutral setup)\n'
         
         return output
     

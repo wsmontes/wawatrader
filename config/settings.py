@@ -59,6 +59,12 @@ class TradingConfig(BaseModel):
     min_confidence: int = Field(default=60, ge=0, le=100)
     default_trade_size: int = Field(default=1, ge=1)
     
+    # Dynamic Watchlist Configuration
+    max_watchlist_size: int = Field(default=50, ge=5, le=100, description="Maximum symbols in active watchlist")
+    min_watchlist_size: int = Field(default=10, ge=1, le=50, description="Minimum symbols to maintain")
+    use_llm_watchlist: bool = Field(default=True, description="Let LLM build watchlist dynamically")
+    watchlist_refresh_hours: int = Field(default=24, ge=1, le=168, description="Hours between watchlist updates")
+    
     @field_validator('sentiment_weight')
     @classmethod
     def validate_weights_sum(cls, v, info):

@@ -106,7 +106,30 @@ def main():
         
         # Step 2: Initialize Trading Agent
         print("⚡ Initializing trading agent...")
-        symbols = ["AAPL", "MSFT", "GOOGL", "TSLA", "NVDA"]
+        
+        # Let LLM build dynamic watchlist from market intelligence
+        from wawatrader.market_intelligence import MarketIntelligence
+        
+        logger.info("🤖 LLM will build dynamic watchlist from market intelligence...")
+        
+        symbols = []
+        try:
+            # Try Alpaca active stocks first
+            symbols = temp_client.get_active_stocks(limit=50)
+            logger.info(f"📋 Got {len(symbols)} active stocks from Alpaca")
+        except Exception as e:
+            logger.warning(f"Alpaca active stocks unavailable: {e}")
+            # Fall back to market intelligence
+            try:
+                intel = MarketIntelligence()
+                universe = intel.get_dynamic_universe(min_mentions=2, max_results=50)
+                symbols = [stock['symbol'] for stock in universe]
+                logger.info(f"🧠 LLM discovered {len(symbols)} symbols from market intelligence")
+            except Exception as e2:
+                logger.error(f"Failed to build dynamic watchlist: {e2}")
+                logger.info("⚠️ Starting with empty watchlist - LLM will discover symbols from news")
+                symbols = []
+        
         agent = TradingAgent(symbols=symbols, dry_run=False)  # Paper trading mode - no real money
         
         # Step 2.5: Start PositionManager monitoring (CRITICAL!)

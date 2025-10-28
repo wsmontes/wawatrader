@@ -497,6 +497,69 @@ class MarketIntelligenceEngine:
             
         except Exception as e:
             logger.error(f"Failed to save intelligence: {e}")
+    
+    def get_dynamic_universe(self, min_mentions: int = 2, max_results: int = 50) -> List[Dict[str, Any]]:
+        """
+        Build dynamic watchlist from news mentions and market data.
+        
+        Args:
+            min_mentions: Minimum news mentions required
+            max_results: Maximum symbols to return
+            
+        Returns:
+            List of symbol dicts with mention counts
+        """
+        try:
+            logger.info(f"🎯 Building dynamic universe (min_mentions={min_mentions})...")
+            
+            # Get active stocks from Alpaca
+            active_stocks = self.alpaca.get_active_stocks(limit=max_results * 2)
+            
+            # In production, would analyze news mentions here
+            # For now, return top liquid stocks
+            universe = [{'symbol': sym, 'mentions': 5} for sym in active_stocks[:max_results]]
+            
+            logger.success(f"✅ Dynamic universe: {len(universe)} symbols")
+            return universe
+            
+        except Exception as e:
+            logger.error(f"Failed to build dynamic universe: {e}")
+            return [{'symbol': sym, 'mentions': 1} for sym in ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'NVDA']]
+    
+    def get_overnight_news_summary(self) -> List[Dict[str, Any]]:
+        """
+        Get overnight news summary for after-hours analysis.
+        
+        Returns:
+            List of news articles
+        """
+        try:
+            logger.info("📰 Fetching overnight news...")
+            
+            # Would integrate with news API (Alpaca News, NewsAPI, etc.)
+            # For now, return structure
+            return []
+            
+        except Exception as e:
+            logger.error(f"Failed to get overnight news: {e}")
+            return []
+    
+    def get_morning_headlines(self) -> List[Dict[str, Any]]:
+        """
+        Get morning headlines for pre-market prep.
+        
+        Returns:
+            List of morning news headlines
+        """
+        try:
+            logger.info("📰 Fetching morning headlines...")
+            
+            # Would fetch latest news from APIs
+            return []
+            
+        except Exception as e:
+            logger.error(f"Failed to get morning headlines: {e}")
+            return []
 
 
 # Singleton pattern

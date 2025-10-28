@@ -1123,6 +1123,18 @@ class Dashboard:
                                 selected_className='custom-tab--selected'
                             ),
                             dcc.Tab(
+                                label='🎯 Decisions', 
+                                value='decisions',
+                                className='custom-tab',
+                                selected_className='custom-tab--selected'
+                            ),
+                            dcc.Tab(
+                                label='📊 Orders', 
+                                value='orders',
+                                className='custom-tab',
+                                selected_className='custom-tab--selected'
+                            ),
+                            dcc.Tab(
                                 label='� Raw JSON', 
                                 value='raw',
                                 className='custom-tab',
@@ -1856,6 +1868,186 @@ class Dashboard:
                         ], style={"padding": "16px"})
                     ]
                 
+                elif tab == 'decisions':
+                    # Show trading decisions timeline
+                    decisions = self._get_trading_decisions(limit=50)
+                    
+                    if not decisions:
+                        return [
+                            html.Div([
+                                html.Div("🎯 No trading decisions recorded yet", 
+                                       style={
+                                           "textAlign": "center",
+                                           "color": "var(--text-muted)",
+                                           "padding": "40px 20px",
+                                           "fontSize": "13px"
+                                       })
+                            ])
+                        ]
+                    
+                    decision_items = []
+                    for decision in reversed(decisions):  # Show most recent first
+                        timestamp = decision.get('timestamp', 'N/A')
+                        symbol = decision.get('symbol', 'N/A')
+                        action = decision.get('action', 'HOLD').upper()
+                        confidence = decision.get('confidence', 0)
+                        reasoning = decision.get('reasoning', 'No reasoning provided')
+                        
+                        # Color based on action
+                        action_color = "#00ff88" if action == "BUY" else "#ff4444" if action == "SELL" else "#00aaff"
+                        
+                        # Format timestamp
+                        try:
+                            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                            time_str = dt.strftime("%I:%M:%S %p")
+                            date_str = dt.strftime("%b %d, %Y")
+                        except:
+                            time_str = "N/A"
+                            date_str = "N/A"
+                        
+                        decision_items.append(
+                            html.Div([
+                                html.Div([
+                                    html.Span(f"{symbol}", style={
+                                        "fontSize": "16px",
+                                        "fontWeight": "700",
+                                        "color": "#fff",
+                                        "marginRight": "12px"
+                                    }),
+                                    html.Span(action, style={
+                                        "fontSize": "14px",
+                                        "fontWeight": "600",
+                                        "color": action_color,
+                                        "padding": "4px 12px",
+                                        "background": f"{action_color}20",
+                                        "borderRadius": "6px",
+                                        "marginRight": "12px"
+                                    }),
+                                    html.Span(f"{confidence}% confident", style={
+                                        "fontSize": "12px",
+                                        "color": "var(--text-muted)"
+                                    })
+                                ], style={
+                                    "display": "flex",
+                                    "alignItems": "center",
+                                    "marginBottom": "8px"
+                                }),
+                                html.Div(reasoning, style={
+                                    "fontSize": "12px",
+                                    "color": "#ccc",
+                                    "lineHeight": "1.6",
+                                    "marginBottom": "8px"
+                                }),
+                                html.Div(f"🕐 {time_str} • {date_str}", style={
+                                    "fontSize": "10px",
+                                    "color": "var(--text-muted)",
+                                    "fontFamily": "JetBrains Mono"
+                                })
+                            ], style={
+                                "padding": "16px",
+                                "marginBottom": "12px",
+                                "background": "rgba(0,0,0,0.3)",
+                                "borderRadius": "8px",
+                                "border": f"1px solid {action_color}40"
+                            })
+                        )
+                    
+                    return decision_items
+                
+                elif tab == 'orders':
+                    # Show order execution history
+                    orders = self._get_order_executions(limit=50)
+                    
+                    if not orders:
+                        return [
+                            html.Div([
+                                html.Div("📊 No order executions recorded yet", 
+                                       style={
+                                           "textAlign": "center",
+                                           "color": "var(--text-muted)",
+                                           "padding": "40px 20px",
+                                           "fontSize": "13px"
+                                       })
+                            ])
+                        ]
+                    
+                    order_items = []
+                    for order in reversed(orders):  # Show most recent first
+                        timestamp = order.get('timestamp', 'N/A')
+                        event_type = order.get('type', 'submission')
+                        symbol = order.get('symbol', 'N/A')
+                        side = order.get('side', 'N/A').upper()
+                        qty = order.get('qty', 0)
+                        
+                        # Different displays for different event types
+                        if event_type == 'submission':
+                            status_icon = "📤"
+                            status_text = "Order Submitted"
+                            status_color = "#00aaff"
+                        elif event_type == 'fill':
+                            status_icon = "✅"
+                            status_text = "Order Filled"
+                            status_color = "#00ff88"
+                            fill_price = order.get('fill_price', 0)
+                            duration = order.get('duration_seconds', 0)
+                        elif event_type == 'timeout':
+                            status_icon = "⏱️"
+                            status_text = "Order Timeout"
+                            status_color = "#ff4444"
+                        else:
+                            status_icon = "❌"
+                            status_text = order.get('error', 'Order Failed')
+                            status_color = "#ff4444"
+                        
+                        # Format timestamp
+                        try:
+                            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                            time_str = dt.strftime("%I:%M:%S %p")
+                            date_str = dt.strftime("%b %d, %Y")
+                        except:
+                            time_str = "N/A"
+                            date_str = "N/A"
+                        
+                        # Build order details
+                        details = f"{side} {qty} shares of {symbol}"
+                        if event_type == 'fill':
+                            details += f" @ ${fill_price:.2f} (filled in {duration:.1f}s)"
+                        
+                        order_items.append(
+                            html.Div([
+                                html.Div([
+                                    html.Span(status_icon, style={"fontSize": "20px", "marginRight": "10px"}),
+                                    html.Span(status_text, style={
+                                        "fontSize": "14px",
+                                        "fontWeight": "600",
+                                        "color": status_color
+                                    })
+                                ], style={
+                                    "display": "flex",
+                                    "alignItems": "center",
+                                    "marginBottom": "8px"
+                                }),
+                                html.Div(details, style={
+                                    "fontSize": "13px",
+                                    "color": "#fff",
+                                    "marginBottom": "8px"
+                                }),
+                                html.Div(f"🕐 {time_str} • {date_str}", style={
+                                    "fontSize": "10px",
+                                    "color": "var(--text-muted)",
+                                    "fontFamily": "JetBrains Mono"
+                                })
+                            ], style={
+                                "padding": "16px",
+                                "marginBottom": "12px",
+                                "background": "rgba(0,0,0,0.3)",
+                                "borderRadius": "8px",
+                                "border": f"1px solid {status_color}40"
+                            })
+                        )
+                    
+                    return order_items
+                
                 elif tab == 'raw':
                     # Show raw data with JSON
                     thoughts = []
@@ -2325,6 +2517,53 @@ class Dashboard:
             
         except Exception as e:
             logger.error(f"Error reading conversations: {e}")
+            return []
+    
+    def _get_trading_decisions(self, limit: int = 50):
+        """Get trading decisions from decisions.jsonl"""
+        try:
+            log_file = Path("logs/decisions.jsonl")
+            decisions = []
+            
+            if log_file.exists():
+                with open(log_file, 'r') as f:
+                    for line in f:
+                        try:
+                            decision = json.loads(line)
+                            # Add timestamp if missing
+                            if 'timestamp' not in decision:
+                                decision['timestamp'] = datetime.now().isoformat()
+                            decisions.append(decision)
+                        except json.JSONDecodeError:
+                            continue
+            
+            # Return last N decisions
+            return decisions[-limit:] if len(decisions) > limit else decisions
+            
+        except Exception as e:
+            logger.error(f"Error reading decisions: {e}")
+            return []
+    
+    def _get_order_executions(self, limit: int = 50):
+        """Get order executions from order_executions.jsonl"""
+        try:
+            log_file = Path("logs/order_executions.jsonl")
+            orders = []
+            
+            if log_file.exists():
+                with open(log_file, 'r') as f:
+                    for line in f:
+                        try:
+                            order = json.loads(line)
+                            orders.append(order)
+                        except json.JSONDecodeError:
+                            continue
+            
+            # Return last N orders
+            return orders[-limit:] if len(orders) > limit else orders
+            
+        except Exception as e:
+            logger.error(f"Error reading order executions: {e}")
             return []
     
         # Modal open/close callback

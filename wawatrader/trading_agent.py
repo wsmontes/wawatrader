@@ -106,6 +106,10 @@ class TradingAgent:
         self.daily_traded_value: float = 0  # Track total value traded for turnover calc
         self.last_reset_date: Optional[datetime] = None  # Track when we last reset daily metrics
         
+        # Learning insights cache (generated once per day)
+        self.daily_learning_insights: Optional[Dict[str, Any]] = None
+        self.learning_insights_date: Optional[datetime] = None
+        
         # Configuration
         self.min_confidence = settings.trading.min_confidence
         self.lookback_days = 90  # Historical data for indicators
@@ -149,6 +153,57 @@ class TradingAgent:
             self.daily_trade_count = 0
             self.daily_traded_value = 0
             self.last_reset_date = today
+            
+            # Generate morning insights for new day
+            self._generate_morning_insights()
+    
+    def _generate_morning_insights(self):
+        """Generate learning insights for the trading day (cached)"""
+        try:
+            today = datetime.now().date()
+            
+            # Only generate once per day
+            if self.learning_insights_date == today and self.daily_learning_insights:
+                logger.debug("Using cached morning insights")
+                return
+            
+            logger.info("🌅 Generating morning learning insights...")
+            self.daily_learning_insights = self.learning_engine.generate_morning_insights()
+            self.learning_insights_date = today
+            
+            # Log summary
+            insights = self.daily_learning_insights
+            if insights.get('yesterday'):
+                yesterday = insights['yesterday']
+                logger.info(f"   Yesterday: {yesterday.get('total_trades', 0)} trades, "
+                          f"{yesterday.get('win_rate', 0):.1%} win rate, "
+                          f"${yesterday.get('total_pnl', 0):+.2f} P&L")
+            
+            pattern_count = len(insights.get('patterns', []))
+            if pattern_count > 0:
+                logger.info(f"   Discovered {pattern_count} profitable patterns")
+            
+            focus_count = len(insights.get('focus_areas', []))
+            if focus_count > 0:
+                logger.info(f"   {focus_count} focus areas for today")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to generate morning insights: {e}")
+            self.daily_learning_insights = None
+    
+    def get_learning_insights(self) -> Optional[Dict[str, Any]]:
+        """
+        Get learning insights for LLM context.
+        
+        Returns:
+            Learning insights dict or None if not available
+        """
+        # Ensure insights are generated for today
+        today = datetime.now().date()
+        if self.learning_insights_date != today:
+            self._generate_morning_insights()
+        
+        return self.daily_learning_insights
     
     def calculate_transaction_costs(self, shares: int, price: float) -> float:
         """
@@ -348,12 +403,16 @@ class TradingAgent:
                 'current_price': float(pos.get('current_price', signals['price']['close']))
             }
         
-        # Step 5: LLM analysis
+        # Step 5: Get learning insights (NEW - closes feedback loop!)
+        learning_insights = self.get_learning_insights()
+        
+        # Step 6: LLM analysis with learning context
         llm_analysis = self.llm_bridge.analyze_market(
             symbol=symbol,
             signals=signals,
             news=news,
-            current_position=current_position
+            current_position=current_position,
+            learning_insights=learning_insights  # NEW: Feed insights to LLM
         )
         
         # If LLM fails, use fallback

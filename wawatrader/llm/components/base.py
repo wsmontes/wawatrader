@@ -30,6 +30,7 @@ class QueryContext:
         expected_format: Expected response structure
         allow_data_requests: Whether LLM can request additional data
         overnight_analysis: Optional overnight deep analysis results
+        learning_insights: Optional learning insights from past performance
         extra_data: Additional context-specific data
     """
     query_type: str
@@ -44,6 +45,7 @@ class QueryContext:
     expected_format: str = 'STANDARD_DECISION'
     allow_data_requests: bool = False
     overnight_analysis: Optional[Dict[str, Any]] = None
+    learning_insights: Optional[Dict[str, Any]] = None  # NEW: Learning feedback
     extra_data: Dict[str, Any] = field(default_factory=dict)
     
     # Query type constants

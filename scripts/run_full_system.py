@@ -19,7 +19,7 @@ import atexit
 from pathlib import Path
 from typing import Optional, Dict, Any
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Add project to path
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -28,6 +28,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from loguru import logger
 from wawatrader.alpaca_client import get_client
 from wawatrader.dashboard import Dashboard
+from wawatrader.market_hours_manager import MarketHoursManager
+from wawatrader.trading_agent import TradingAgent
 
 # Configure logging
 logger.remove()
@@ -239,21 +241,28 @@ class SystemOrchestrator:
             
             # Get actively traded stocks from Alpaca (dynamic watchlist)
             alpaca = get_client()
+            watchlist = []
+            
             try:
-                watchlist = alpaca.get_active_stocks(limit=50)  # Get top 50 liquid stocks
+                # Try to get dynamic watchlist from Alpaca
+                watchlist = alpaca.get_active_stocks(limit=50)
                 logger.info(f"📋 Dynamic watchlist loaded: {len(watchlist)} stocks")
             except Exception as e:
-                logger.warning(f"⚠️  Failed to get dynamic watchlist: {e}")
-                # Fallback to a curated list of highly liquid stocks
-                watchlist = [
-                    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'BRK.B',
-                    'JPM', 'JNJ', 'V', 'PG', 'MA', 'HD', 'UNH', 'DIS', 'BAC', 'XOM',
-                    'CSCO', 'ADBE', 'NFLX', 'PFE', 'KO', 'PEP', 'TMO', 'ABBV', 'COST',
-                    'MRK', 'AVGO', 'WMT', 'CRM', 'ACN', 'TXN', 'MDT', 'LLY', 'NKE',
-                    'DHR', 'NEE', 'ORCL', 'CVX', 'BMY', 'UPS', 'QCOM', 'PM', 'T',
-                    'HON', 'IBM', 'AMT', 'SBUX', 'INTU', 'LOW', 'AMD', 'AMAT', 'GE'
-                ]
-                logger.info(f"📋 Using fallback watchlist: {len(watchlist)} stocks")
+                logger.warning(f"⚠️  Failed to get dynamic watchlist from Alpaca: {e}")
+                logger.info("🤖 LLM will build watchlist from market intelligence...")
+            
+            # If no watchlist from Alpaca, LLM will discover symbols from:
+            # 1. News analysis (MarketIntelligence.get_dynamic_universe)
+            # 2. Sector momentum analysis
+            # 3. Unusual volume/price action
+            # 4. Overnight analysis recommendations
+            
+            if not watchlist:
+                from wawatrader.market_intelligence import MarketIntelligence
+                intel = MarketIntelligence()
+                universe = intel.get_dynamic_universe(min_mentions=2, max_results=50)
+                watchlist = [stock['symbol'] for stock in universe]
+                logger.info(f"🧠 LLM-discovered watchlist: {len(watchlist)} symbols from market intelligence")
             
             # Load overnight analysis if available
             overnight_analysis = []
@@ -279,27 +288,37 @@ class SystemOrchestrator:
             
             logger.info(f"🎯 Trading agent initialized")
             logger.info(f"   Watchlist: {', '.join(watchlist[:10])}{'...' if len(watchlist) > 10 else ''}")
-            logger.info("⏰ Trading cycles run every 5 minutes during market hours")
+            
+            # Initialize intelligent market hours manager
+            hours_manager = MarketHoursManager(agent)
+            logger.success("✅ Market hours manager initialized")
+            logger.info("🌍 System will adapt behavior based on market phase:")
+            logger.info("   🟢 Market Open: Active trading (5 min cycles)")
+            logger.info("   📊 After Hours: Learning and analysis (30 min)")
+            logger.info("   🔍 Evening: Deep research (1 hour)")
+            logger.info("   💤 Deep Night: Sleep mode (2 hours)")
+            logger.info("   🌅 Pre-Market: Preparation (15 min)")
             
             while not self.shutdown_requested:
                 try:
-                    # Check if market is open
-                    market_status = alpaca.get_market_status()
+                    # Run appropriate task for current market phase
+                    result = hours_manager.run_appropriate_task()
                     
-                    if market_status.get('is_open', False):
-                        logger.info("📊 Running trading cycle...")
-                        agent.run_cycle()
-                        logger.success("✅ Trading cycle complete")
-                        
-                        # Wait 5 minutes before next cycle
-                        time.sleep(300)
+                    # Log result
+                    if result['status'] == 'success':
+                        logger.success(f"✅ {result.get('task', 'Task')} complete")
                     else:
-                        logger.info("⏰ Market closed - waiting 60 seconds before recheck")
-                        time.sleep(60)
+                        logger.warning(f"⚠️  {result.get('task', 'Task')} had issues")
+                    
+                    # Sleep for appropriate interval
+                    sleep_seconds = result.get('next_run_seconds', 300)
+                    next_run = datetime.now() + timedelta(seconds=sleep_seconds)
+                    logger.info(f"⏰ Next check at {next_run.strftime('%I:%M %p')} ({sleep_seconds/60:.0f} min)")
+                    time.sleep(sleep_seconds)
                         
                 except Exception as e:
-                    logger.error(f"❌ Trading loop error: {e}")
-                    time.sleep(60)  # Wait 1 minute on error
+                    logger.error(f"❌ System error: {e}")
+                    time.sleep(300)  # Wait 5 minutes on error
         
         # Start trading in background thread
         trading_thread = threading.Thread(target=trading_loop, daemon=True)

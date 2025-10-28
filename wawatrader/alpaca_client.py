@@ -20,6 +20,9 @@ LOGGING STRATEGY:
 
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
+from uuid import UUID
+from decimal import Decimal
+from enum import Enum
 import pandas as pd
 import numpy as np
 import json
@@ -98,14 +101,45 @@ class AlpacaClient:
         """
         Append structured data to JSONL log file
         
+        Automatically handles common non-JSON-serializable types:
+        - Pandas Timestamp, datetime → ISO format strings
+        - UUID → string (for Alpaca asset_id fields)
+        - Decimal → float (for financial amounts)
+        - Enum → value (for Alpaca enums like OrderStatus, AssetClass)
+        - NumPy types → Python native types
+        - Pandas NA → None
+        
         Args:
             filepath: Path to log file
             data: Dictionary to log (will add timestamp)
         """
         try:
             data['timestamp'] = datetime.now().isoformat()
+            
+            # Custom JSON encoder to handle non-JSON-serializable types
+            def json_serializer(obj):
+                """Convert non-JSON-serializable objects to JSON-serializable formats"""
+                if isinstance(obj, (pd.Timestamp, datetime)):
+                    return obj.isoformat()
+                elif isinstance(obj, UUID):
+                    return str(obj)
+                elif isinstance(obj, Decimal):
+                    return float(obj)
+                elif isinstance(obj, Enum):
+                    return obj.value
+                elif isinstance(obj, (np.integer, np.int64, np.int32)):
+                    return int(obj)
+                elif isinstance(obj, (np.floating, np.float64, np.float32)):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif pd.isna(obj):
+                    return None
+                else:
+                    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+            
             with open(filepath, 'a') as f:
-                f.write(json.dumps(data) + '\n')
+                f.write(json.dumps(data, default=json_serializer) + '\n')
         except Exception as e:
             logger.error(f"Failed to log to {filepath}: {e}")
     

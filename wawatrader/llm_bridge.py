@@ -641,6 +641,7 @@ class LLMBridge:
         portfolio_summary: Optional[Dict[str, Any]] = None,
         trigger: str = 'SCHEDULED_CYCLE',
         overnight_context: Optional[Dict[str, Any]] = None,
+        learning_insights: Optional[Dict[str, Any]] = None,
         use_modular: bool = True
     ) -> Optional[Dict[str, Any]]:
         """
@@ -658,15 +659,7 @@ class LLMBridge:
             portfolio_summary: Optional portfolio context
             trigger: What triggered this analysis
             overnight_context: Optional overnight deep analysis results
-            use_modular: If True, use new modular system; if False, fall back to legacy
-        
-        Args:
-            symbol: Stock ticker
-            signals: Dict from get_latest_signals()
-            news: Optional news articles
-            current_position: Optional current position info
-            portfolio_summary: Optional portfolio context
-            trigger: What triggered this analysis
+            learning_insights: Optional learning insights from past performance
             use_modular: If True, use new modular system; if False, fall back to legacy
         
         Returns:
@@ -703,7 +696,8 @@ class LLMBridge:
                     trigger=trigger,
                     profile=self.trading_profile,
                     news=news,
-                    overnight_context=overnight_context
+                    overnight_context=overnight_context,
+                    learning_insights=learning_insights
                 )
             else:
                 # NEW OPPORTUNITY - scanning watchlist
@@ -715,7 +709,8 @@ class LLMBridge:
                     news=news,
                     profile=self.trading_profile,
                     trigger=trigger,
-                    overnight_context=overnight_context
+                    overnight_context=overnight_context,
+                    learning_insights=learning_insights
                 )
                 
         except Exception as e:
@@ -861,7 +856,8 @@ class LLMBridge:
         symbol: str,
         signals: Dict[str, Any],
         news: Optional[List[Dict[str, Any]]] = None,
-        current_position: Optional[Dict[str, Any]] = None
+        current_position: Optional[Dict[str, Any]] = None,
+        learning_insights: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Complete pipeline: indicators → text → LLM → structured analysis.
@@ -873,6 +869,7 @@ class LLMBridge:
             signals: Dict from get_latest_signals()
             news: Optional news articles
             current_position: Optional current position info
+            learning_insights: Optional insights from learning engine (yesterday's performance)
         
         Returns:
             Parsed LLM analysis, or None if any step fails
