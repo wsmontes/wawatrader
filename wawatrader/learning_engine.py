@@ -178,7 +178,9 @@ class LearningEngine:
             if date is None:
                 date = datetime.now()
             
-            logger.info(f"📊 Analyzing performance for {date.date()}")
+            # Convert datetime to date if needed
+            date_str = date.date() if isinstance(date, datetime) else date
+            logger.info(f"📊 Analyzing performance for {date_str}")
             
             # Get today's completed trades
             decisions_df = self.memory.get_recent_decisions(days=1)

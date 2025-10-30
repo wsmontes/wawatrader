@@ -960,6 +960,35 @@ class AlpacaClient:
         except Exception as e:
             logger.error(f"❌ Error getting orders: {e}")
             return []
+    
+    def get_position_entry_time(self, symbol: str) -> Optional[datetime]:
+        """
+        Get the entry time for a position by finding the most recent filled buy order
+        
+        Args:
+            symbol: Stock symbol
+            
+        Returns:
+            Datetime of position entry, or None if not found
+        """
+        try:
+            request = GetOrdersRequest(
+                status=OrderStatus.FILLED,
+                symbols=[symbol],
+                side=OrderSide.BUY,
+                limit=1  # Get most recent
+            )
+            
+            orders = self.trading_client.get_orders(request)
+            
+            if orders and len(orders) > 0:
+                return orders[0].filled_at
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Could not get entry time for {symbol}: {e}")
+            return None
 
     def get_active_stocks(self, min_price: float = 5.0, max_price: float = 1000.0, 
                          asset_class: str = 'us_equity', limit: int = 100) -> List[str]:

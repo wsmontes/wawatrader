@@ -434,7 +434,7 @@ class TradingMemory:
                         best_indicator, worst_indicator
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    date.date(),
+                    date if isinstance(date, str) else date.isoformat(),
                     performance['total_trades'],
                     performance['winning_trades'],
                     performance['losing_trades'],
@@ -456,7 +456,7 @@ class TradingMemory:
                 
                 conn.commit()
             
-            logger.info(f"📊 Daily performance saved for {date.date()}")
+            logger.info(f"📊 Daily performance saved for {date if isinstance(date, str) else date.isoformat()}")
             
         except Exception as e:
             logger.error(f"❌ Error saving daily performance: {e}")

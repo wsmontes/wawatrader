@@ -23,12 +23,36 @@ from loguru import logger
 
 from wawatrader.alpaca_client import get_client
 from wawatrader.indicators import analyze_dataframe, get_latest_signals
-from wawatrader.llm_bridge import LLMBridge
+from wawatrader.llm_v2 import ModularLLMAnalyzer  # NEW: Modular prompt system with simplified format
 from wawatrader.risk_manager import get_risk_manager
 from wawatrader.market_intelligence import get_intelligence_engine
 from wawatrader.learning_engine import LearningEngine
 from wawatrader.position_manager import PositionManager
 from config.settings import settings
+
+# EVENT-DRIVEN ARCHITECTURE IMPORTS
+from wawatrader.decision_memory import (
+    get_memory_store, 
+    DecisionMemory, 
+    DecisionType,
+    ThesisRealityComparator
+)
+from wawatrader.event_system import (
+    get_event_queue,
+    Event,
+    EventType,
+    EventPriority,
+    PriceAlertMonitor,
+    VolumeMonitor
+)
+from wawatrader.position_sizing import (
+    KellyLLMPositionSizer,
+    PortfolioRiskManager
+)
+
+# PHASE 4: MARKET HOURS INTEGRATION
+from wawatrader.market_hours_manager import MarketHoursManager, MarketPhase
+from wawatrader.symbol_discovery import SymbolDiscoveryEngine
 
 
 @dataclass
@@ -80,12 +104,25 @@ class TradingAgent:
         
         # Initialize components
         self.alpaca = get_client()
-        self.llm_bridge = LLMBridge()
+        self.llm_bridge = ModularLLMAnalyzer()  # NEW: Using modular LLM with simplified prompts
         self.risk_manager = get_risk_manager()
         self.intelligence_engine = get_intelligence_engine()
         self.learning_engine = LearningEngine(self.alpaca)
         
-        # Initialize event-driven position manager (NEW)
+        # EVENT-DRIVEN ARCHITECTURE COMPONENTS (NEW)
+        self.event_queue = get_event_queue()
+        self.memory_store = get_memory_store()
+        self.comparator = ThesisRealityComparator(self.memory_store)
+        self.kelly_sizer = KellyLLMPositionSizer(self.memory_store)
+        self.portfolio_risk_manager = PortfolioRiskManager()
+        self.price_monitor = PriceAlertMonitor(self.event_queue)
+        self.volume_monitor = VolumeMonitor(self.event_queue)
+        
+        # PHASE 4: MARKET HOURS & SYMBOL DISCOVERY
+        self.symbol_discovery = SymbolDiscoveryEngine(self.alpaca, self.intelligence_engine)
+        self.market_hours_manager = MarketHoursManager(self)
+        
+        # Initialize event-driven position manager (LEGACY - will be replaced)
         self.position_manager = PositionManager(
             alpaca_client=self.alpaca,
             llm_bridge=self.llm_bridge,
@@ -114,12 +151,18 @@ class TradingAgent:
         self.min_confidence = settings.trading.min_confidence
         self.lookback_days = 90  # Historical data for indicators
         
-        # TRADING CONSTRAINTS (to prevent overtrading)
-        self.MIN_HOLD_PERIOD = timedelta(hours=2)  # Must hold positions for at least 2 hours
-        self.MAX_DAILY_TRADES = 20  # Maximum trades per day
-        self.MAX_DAILY_LOSS_PCT = 0.01  # Stop trading if daily loss exceeds 1%
-        self.MAX_TURNOVER_RATIO = 3.0  # Stop if daily turnover > 300% of portfolio
-        self.MIN_EXPECTED_PROFIT = 50.0  # Minimum expected profit after costs ($)
+        # LEGACY CONSTRAINTS (DEPRECATED - now handled by event-driven architecture)
+        # These arbitrary limits are replaced by:
+        # - Strategy-specific rules stored in DecisionMemory
+        # - Event-driven re-evaluation triggers
+        # - Kelly Criterion position sizing
+        # - Emergency portfolio stops only (20/40/60 via PortfolioRiskManager)
+        # BUT keep these as final safety backstops:
+        self.MAX_DAILY_TRADES = 20
+        self.MAX_DAILY_LOSS_PCT = 0.01
+        self.MAX_TURNOVER_RATIO = 3.0
+        self.MIN_EXPECTED_PROFIT = 50.0
+        # self.MIN_HOLD_PERIOD = timedelta(hours=2)
         
         # Logging
         self.setup_logging()
@@ -407,13 +450,41 @@ class TradingAgent:
         learning_insights = self.get_learning_insights()
         
         # Step 6: LLM analysis with learning context
-        llm_analysis = self.llm_bridge.analyze_market(
-            symbol=symbol,
-            signals=signals,
-            news=news,
-            current_position=current_position,
-            learning_insights=learning_insights  # NEW: Feed insights to LLM
-        )
+        # EVENT-DRIVEN: Use thesis vs reality for position re-evaluation
+        if current_position and symbol in [m.symbol for m in self.memory_store.get_all_open_positions()]:
+            # We have an open position with stored memory - use thesis vs reality
+            llm_analysis = self._analyze_with_thesis_vs_reality(
+                symbol=symbol,
+                signals=signals,
+                news=news,
+                current_position=current_position,
+                learning_insights=learning_insights
+            )
+        elif current_position:
+            # Analyzing existing position (no thesis stored yet)
+            account = self.alpaca.get_account()
+            portfolio_data = {
+                'total_value': float(account['equity']),
+                'buying_power': float(account['buying_power']),
+                'positions_count': len(self.positions),
+                'daily_pnl': self.current_pnl
+            }
+            llm_analysis = self.llm_bridge.analyze_position(
+                symbol=symbol,
+                technical_data=signals,
+                position_data=current_position,
+                portfolio_data=portfolio_data,
+                news=news,
+                learning_insights=learning_insights
+            )
+        else:
+            # New opportunity
+            llm_analysis = self.llm_bridge.analyze_new_opportunity(
+                symbol=symbol,
+                technical_data=signals,
+                news=news,
+                learning_insights=learning_insights
+            )
         
         # If LLM fails, use fallback
         if not llm_analysis:
@@ -427,6 +498,148 @@ class TradingAgent:
             'news': news,
             'current_position': current_position
         }
+    
+    def _analyze_with_thesis_vs_reality(
+        self,
+        symbol: str,
+        signals: Dict[str, Any],
+        news: List[Dict[str, Any]],
+        current_position: Dict[str, Any],
+        learning_insights: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Re-evaluate position using thesis vs reality comparison.
+        
+        EVENT-DRIVEN: Shows LLM what it originally thought vs what actually happened.
+        This enables self-correction and learning from thesis invalidation.
+        
+        Args:
+            symbol: Stock ticker
+            signals: Technical indicators
+            news: Recent news
+            current_position: Current position details
+            learning_insights: Historical learning data
+        
+        Returns:
+            LLM analysis dict with action, confidence, reasoning
+        """
+        try:
+            # Get current price
+            current_price = signals['price']['close']
+            
+            # Build current market data
+            current_data = {
+                'price': current_price,
+                'signals': signals,
+                'news': news,
+                'position': current_position,
+                'learning_insights': learning_insights
+            }
+            
+            # Get thesis vs reality comparison
+            comparison = self.comparator.get_comparison(
+                symbol=symbol,
+                current_price=current_price,
+                current_data=current_data
+            )
+            
+            if not comparison:
+                logger.warning(f"⚠️ No memory found for {symbol}, falling back to standard analysis")
+                # Has position but no memory - use analyze_position
+                account = self.alpaca.get_account()
+                portfolio_data = {
+                    'total_value': float(account['equity']),
+                    'buying_power': float(account['buying_power']),
+                    'positions_count': len(self.positions),
+                    'daily_pnl': self.current_pnl
+                }
+                return self.llm_bridge.analyze_position(
+                    symbol=symbol,
+                    technical_data=signals,
+                    position_data=current_position,
+                    portfolio_data=portfolio_data,
+                    news=news,
+                    learning_insights=learning_insights
+                )
+            
+            # Build enhanced prompt with thesis vs reality
+            prompt = self.comparator.build_reeval_prompt(
+                symbol=symbol,
+                current_price=current_price,
+                current_data=current_data,
+                trigger_event="Scheduled re-evaluation cycle"
+            )
+            
+            logger.info(f"🔄 Re-evaluating {symbol} with thesis vs reality context")
+            logger.debug(f"   Original entry: ${comparison['original_thesis']['entry_price']:.2f}")
+            logger.debug(f"   Current price: ${current_price:.2f}")
+            logger.debug(f"   P&L: {comparison['position_details']['unrealized_pnl_pct']:+.2f}%")
+            logger.debug(f"   Original thesis: {comparison['original_thesis']['thesis_narrative'][:80]}...")
+            
+            # Send enhanced prompt to LLM with thesis vs reality context
+            account = self.alpaca.get_account()
+            portfolio_data = {
+                'total_value': float(account['equity']),
+                'buying_power': float(account['buying_power']),
+                'positions_count': len(self.positions),
+                'daily_pnl': self.current_pnl
+            }
+            
+            llm_response = self.llm_bridge.analyze_position(
+                symbol=symbol,
+                technical_data=signals,
+                position_data=current_position,
+                portfolio_data=portfolio_data,
+                news=news,
+                learning_insights={
+                    'thesis_vs_reality': comparison,
+                    'reeval_prompt': prompt
+                }
+            )
+            
+            # Store revisit in memory
+            if llm_response and llm_response.get('action'):
+                self.memory_store.add_revisit(
+                    symbol=symbol,
+                    revisit_data={
+                        'timestamp': datetime.now().isoformat(),
+                        'price': current_price,
+                        'action': llm_response['action'],
+                        'confidence': llm_response.get('confidence', 0),
+                        'reasoning': llm_response.get('reasoning', ''),
+                        'thesis_still_valid': llm_response.get('thesis_still_valid', True),
+                        'comparison_context': {
+                            'entry_price': comparison['original_thesis']['entry_price'],
+                            'pnl_pct': comparison['position_details']['unrealized_pnl_pct'],
+                            'target_progress': (current_price - comparison['original_thesis']['entry_price']) / 
+                                             (comparison['original_thesis']['target_price'] - comparison['original_thesis']['entry_price']) * 100
+                        }
+                    }
+                )
+                logger.debug(f"💾 Revisit stored for {symbol}: {llm_response['action']}")
+            
+            return llm_response
+            
+        except Exception as e:
+            logger.error(f"❌ Thesis vs reality analysis failed for {symbol}: {e}")
+            logger.warning(f"   Falling back to standard analysis")
+            
+            # Fallback to standard analysis
+            account = self.alpaca.get_account()
+            portfolio_data = {
+                'total_value': float(account['equity']),
+                'buying_power': float(account['buying_power']),
+                'positions_count': len(self.positions),
+                'daily_pnl': self.current_pnl
+            }
+            return self.llm_bridge.analyze_position(
+                symbol=symbol,
+                technical_data=signals,
+                position_data=current_position,
+                portfolio_data=portfolio_data,
+                news=news,
+                learning_insights=learning_insights
+            )
     
     def make_decision(self, analysis: Dict[str, Any]) -> TradingDecision:
         """
@@ -452,8 +665,15 @@ class TradingAgent:
         # Get current price
         price = signals['price']['close']
         
-        # Determine shares to trade
-        shares = self._calculate_position_size(symbol, price, action)
+        # Determine shares to trade (EVENT-DRIVEN: uses Kelly+LLM sizing)
+        strategy = llm.get('strategy', 'unknown')
+        shares = self._calculate_position_size(
+            symbol=symbol,
+            price=price,
+            action=action,
+            strategy=strategy,
+            llm_conviction=confidence
+        )
         
         # Create decision
         decision = TradingDecision(
@@ -527,7 +747,7 @@ class TradingAgent:
         # For BUY: Only proceed if we expect profit > costs (use MIN_EXPECTED_PROFIT threshold)
         if action == 'buy':
             min_profit_needed = est_costs * 3  # Need 3x costs to justify trade
-            if min_profit_needed > trade_value * self.MIN_EXPECTED_PROFIT:
+            if min_profit_needed > self.MIN_EXPECTED_PROFIT:
                 decision.risk_approved = False
                 decision.risk_reason = f"Expected profit too low. Est costs: ${est_costs:.2f}, min profit: ${min_profit_needed:.2f}"
                 logger.warning(f"❌ {symbol}: Trade costs (${est_costs:.2f}) too high relative to expected profit")
@@ -583,14 +803,25 @@ class TradingAgent:
         
         return decision
     
-    def _calculate_position_size(self, symbol: str, price: float, action: str) -> int:
+    def _calculate_position_size(
+        self, 
+        symbol: str, 
+        price: float, 
+        action: str, 
+        strategy: str = "unknown",
+        llm_conviction: int = 50
+    ) -> int:
         """
-        Calculate position size based on account value and risk limits.
+        Calculate position size using Kelly Criterion + LLM conviction.
+        
+        EVENT-DRIVEN ARCHITECTURE: Uses KellyLLMPositionSizer for mathematical backing.
         
         Args:
             symbol: Stock ticker
             price: Current price
             action: "buy" or "sell"
+            strategy: Trading strategy name (e.g., "momentum_breakout")
+            llm_conviction: LLM conviction score (0-100)
         
         Returns:
             Number of shares
@@ -604,7 +835,77 @@ class TradingAgent:
                 return abs(int(float(self.positions[symbol]['qty'])))
             return 0
         
-        # For buy: calculate based on max position size
+        # EVENT-DRIVEN: Use Kelly+LLM position sizer
+        try:
+            # Build existing positions list with sector info
+            # Quick sector mapping (proper solution: get from API)
+            SECTOR_MAP = {
+                # Technology
+                'AAPL': 'Technology', 'MSFT': 'Technology', 'GOOGL': 'Technology', 'GOOG': 'Technology',
+                'NVDA': 'Technology', 'AMD': 'Technology', 'INTC': 'Technology', 'AVGO': 'Technology',
+                'QCOM': 'Technology', 'TXN': 'Technology', 'AMAT': 'Technology', 'MU': 'Technology',
+                'ADBE': 'Technology', 'CRM': 'Technology', 'NOW': 'Technology', 'ORCL': 'Technology',
+                'CSCO': 'Technology', 'PANW': 'Technology', 'INTU': 'Technology', 'SNPS': 'Technology',
+                'CDNS': 'Technology',
+                # Communication
+                'META': 'Communication', 'GOOGL': 'Communication', 'GOOG': 'Communication',
+                # Consumer Cyclical
+                'AMZN': 'Consumer Cyclical', 'TSLA': 'Consumer Cyclical',
+                # Financial
+                'JPM': 'Financial', 'BAC': 'Financial', 'WFC': 'Financial', 'GS': 'Financial',
+                'MS': 'Financial', 'C': 'Financial', 'BX': 'Financial', 'SCHW': 'Financial',
+                'AXP': 'Financial', 'USB': 'Financial', 'PNC': 'Financial', 'TFC': 'Financial',
+                'COF': 'Financial', 'BLK': 'Financial', 'SPGI': 'Financial', 'CME': 'Financial',
+                'ICE': 'Financial',
+                # Healthcare
+                'JNJ': 'Healthcare', 'UNH': 'Healthcare', 'LLY': 'Healthcare', 'ABBV': 'Healthcare',
+                'MRK': 'Healthcare', 'PFE': 'Healthcare', 'TMO': 'Healthcare', 'ABT': 'Healthcare',
+                'DHR': 'Healthcare',
+            }
+            
+            existing_positions = []
+            sector_map = {}
+            
+            for sym, pos in self.positions.items():
+                pos_value = float(pos['qty']) * float(pos.get('current_price', price))
+                sector = SECTOR_MAP.get(sym, 'Other')
+                existing_positions.append({
+                    'symbol': sym,
+                    'value': pos_value,
+                    'sector': sector
+                })
+                sector_map[sym] = sector
+            
+            # Get sector for new symbol
+            sector_map[symbol] = SECTOR_MAP.get(symbol, 'Other')
+            
+            # Calculate position using Kelly+LLM
+            position_result = self.kelly_sizer.calculate_position_size(
+                symbol=symbol,
+                entry_price=price,
+                strategy=strategy,
+                llm_conviction=llm_conviction,
+                portfolio_value=self.account_value,
+                existing_positions=existing_positions,
+                sector_map=sector_map
+            )
+            
+            if position_result:
+                logger.info(f"📊 Kelly+LLM Sizing for {symbol}:")
+                logger.info(f"   Kelly Fraction: {position_result.kelly_fraction:.2%}")
+                logger.info(f"   Conviction Adjusted: {position_result.conviction_adjusted_kelly:.2%}")
+                logger.info(f"   Final Position: ${position_result.final_position_usd:,.0f} ({position_result.final_position_pct:.2f}%)")
+                logger.info(f"   Shares: {position_result.shares}")
+                logger.debug(f"   Reasoning: {position_result.reasoning}")
+                
+                return position_result.shares
+            else:
+                logger.warning(f"⚠️ Kelly sizing failed, using fallback")
+                
+        except Exception as e:
+            logger.error(f"❌ Error calculating Kelly position size: {e}")
+        
+        # FALLBACK: Use simple max position size
         max_position_value = self.account_value * settings.risk.max_position_size
         shares = int(max_position_value / price)
         
@@ -612,6 +913,7 @@ class TradingAgent:
         if shares == 0 and self.account_value >= price:
             shares = 1
         
+        logger.debug(f"Using fallback sizing: {shares} shares (${shares * price:,.0f})")
         return shares
     
     def execute_decision(self, decision: TradingDecision):
@@ -670,23 +972,65 @@ class TradingAgent:
             
             if final_order and final_order['status'] == 'filled':
                 decision.executed = True
-                decision.price = final_order['filled_avg_price']  # Update with actual fill price
-                logger.info(f"✅ Order filled @ ${final_order['filled_avg_price']:.2f}")
+                filled_price = final_order['filled_avg_price']
+                decision.price = filled_price  # Update with actual fill price
+                logger.info(f"✅ Order filled @ ${filled_price:.2f}")
                 
                 # Record trade for risk tracking
                 self.risk_manager.record_trade(
                     decision.symbol,
                     decision.action,
                     decision.shares,
-                    final_order['filled_avg_price']
+                    filled_price
                 )
+                
+                # EVENT-DRIVEN: Store DecisionMemory for thesis vs reality tracking
+                if decision.llm_analysis:
+                    decision_id = self._store_decision_memory(
+                        symbol=decision.symbol,
+                        decision=decision,
+                        llm_analysis=decision.llm_analysis,
+                        filled_price=filled_price
+                    )
+                    if decision_id:
+                        self.active_decision_ids[decision.symbol] = decision_id
                 
                 # NEW: Track entry time for position holds
                 if decision.action == 'buy':
                     self.position_entry_times[decision.symbol] = datetime.now()
                     logger.debug(f"📍 Recorded entry time for {decision.symbol}")
                     
-                    # NEW: Hand position to PositionManager for event-driven monitoring
+                    # EVENT-DRIVEN: Set price alerts for target and stop loss
+                    if decision.llm_analysis:
+                        target_price = decision.llm_analysis.get('target_price', filled_price * 1.05)
+                        stop_loss = decision.llm_analysis.get('stop_loss', filled_price * 0.95)
+                        
+                        try:
+                            # Set target alert
+                            self.price_monitor.set_price_alert(
+                                symbol=decision.symbol,
+                                alert_type="above",
+                                price=target_price,
+                                event_type=EventType.TARGET_HIT,
+                                priority=EventPriority.MEDIUM_HIGH,
+                                metadata={'level': 'first_target', 'entry_price': filled_price}
+                            )
+                            
+                            # Set stop loss alert
+                            self.price_monitor.set_price_alert(
+                                symbol=decision.symbol,
+                                alert_type="below",
+                                price=stop_loss,
+                                event_type=EventType.STOP_LOSS_HIT,
+                                priority=EventPriority.CRITICAL,
+                                metadata={'stop_type': 'invalidation', 'entry_price': filled_price}
+                            )
+                            
+                            logger.info(f"🔔 Price alerts set: Target=${target_price:.2f}, Stop=${stop_loss:.2f}")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to set price alerts: {e}")
+                    
+                    # NEW: Hand position to PositionManager for event-driven monitoring (LEGACY)
                     try:
                         analysis = {
                             'signals': decision.indicators,
@@ -694,7 +1038,7 @@ class TradingAgent:
                         }
                         self.position_manager.add_position(
                             symbol=decision.symbol,
-                            entry_price=final_order['filled_avg_price'],
+                            entry_price=filled_price,
                             shares=decision.shares,
                             analysis=analysis
                         )
@@ -825,6 +1169,120 @@ class TradingAgent:
             
         except Exception as e:
             logger.error(f"❌ Error recording trade outcome: {e}")
+    
+    def _store_decision_memory(
+        self, 
+        symbol: str, 
+        decision: TradingDecision,
+        llm_analysis: Dict[str, Any],
+        filled_price: Optional[float] = None
+    ) -> Optional[str]:
+        """
+        Store complete decision context in DecisionMemory for thesis vs reality comparison.
+        
+        This enables the system to show the LLM what it originally thought vs what actually happened.
+        
+        Args:
+            symbol: Stock ticker
+            decision: TradingDecision object with action details
+            llm_analysis: Full LLM analysis dict (contains thesis, catalysts, etc.)
+            filled_price: Actual fill price (use if different from decision.price)
+        
+        Returns:
+            Decision ID if stored successfully, None otherwise
+        """
+        import uuid
+        
+        try:
+            # Extract LLM analysis components
+            thesis = llm_analysis.get('reasoning', 'No thesis provided')
+            strategy = llm_analysis.get('strategy', 'unknown')
+            
+            # Parse catalysts
+            catalysts_raw = llm_analysis.get('catalysts', [])
+            if isinstance(catalysts_raw, str):
+                catalysts = [c.strip() for c in catalysts_raw.split(',') if c.strip()]
+            elif isinstance(catalysts_raw, list):
+                catalysts = catalysts_raw
+            else:
+                catalysts = []
+            
+            # Parse bullish/bearish factors
+            bullish = llm_analysis.get('bullish_factors', [])
+            bearish = llm_analysis.get('bearish_factors', [])
+            if isinstance(bullish, str):
+                bullish = [b.strip() for b in bullish.split(',') if b.strip()]
+            if isinstance(bearish, str):
+                bearish = [b.strip() for b in bearish.split(',') if b.strip()]
+            
+            # Get target and stop levels
+            target_price = llm_analysis.get('target_price', decision.price * 1.05)
+            stop_loss_price = llm_analysis.get('stop_loss', decision.price * 0.95)
+            
+            # Expected holding period
+            holding_period = llm_analysis.get('expected_holding_period', 'swing (2-5 days)')
+            
+            # Invalidation conditions
+            invalidation_conditions = llm_analysis.get('invalidation_conditions', [
+                f"Break below ${stop_loss_price:.2f}",
+                "Volume dries up significantly",
+                "Negative catalyst emerges"
+            ])
+            
+            # Create DecisionMemory
+            memory = DecisionMemory(
+                decision_id=str(uuid.uuid4()),
+                symbol=symbol,
+                timestamp=datetime.now(),
+                decision_type=DecisionType.ENTRY if decision.action == 'buy' else DecisionType.EXIT,
+                
+                # Strategy
+                strategy=strategy,
+                
+                # Thesis
+                thesis=thesis,
+                catalysts=catalysts,
+                bullish_factors=bullish,
+                bearish_factors=bearish,
+                
+                # Risk management
+                entry_price=filled_price or decision.price,
+                target_price=target_price,
+                stop_loss_price=stop_loss_price,
+                expected_holding_period=holding_period,
+                invalidation_conditions=invalidation_conditions,
+                
+                # Position details
+                shares=decision.shares,
+                position_size_usd=decision.shares * (filled_price or decision.price),
+                position_size_pct=(decision.shares * (filled_price or decision.price)) / self.account_value * 100 if self.account_value > 0 else 0,
+                conviction_score=int(decision.confidence),
+                
+                # Kelly sizing (if available)
+                kelly_fraction=getattr(decision, 'kelly_fraction', 0.0),
+                
+                # Market conditions (as dict)
+                market_conditions={
+                    'market_regime': llm_analysis.get('market_regime', 'unknown'),
+                    'sector_sentiment': llm_analysis.get('sector_sentiment', 'neutral'),
+                    'rsi': decision.indicators.get('rsi') if decision.indicators else None,
+                    'trend': decision.indicators.get('trend') if decision.indicators else None,
+                    'volume_vs_avg': decision.indicators.get('volume_ratio') if decision.indicators else None,
+                }
+            )
+            
+            # Store in memory
+            self.memory_store.store(memory)
+            
+            logger.info(f"💾 DecisionMemory stored: {symbol} {decision.action.upper()} @ ${filled_price or decision.price:.2f}")
+            logger.debug(f"   Thesis: {thesis[:100]}...")
+            logger.debug(f"   Catalysts: {', '.join(catalysts[:3])}")
+            
+            return memory.decision_id
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to store DecisionMemory: {e}")
+            return None
     
     def _emergency_liquidate_all(self):
         """
@@ -1201,6 +1659,414 @@ class TradingAgent:
         except Exception as e:
             logger.error(f"❌ Fatal error in intelligent scheduler: {e}")
             raise
+    
+    async def run_event_driven(self):
+        """
+        Event-driven trading loop (Phase 3+4).
+        
+        PHASE 4 INTEGRATION: Market-hours-aware event processing
+        
+        Different activities based on market phase:
+        - MARKET_OPEN: Process events from EventQueue
+        - AFTER_HOURS: Learning and analysis
+        - EVENING_RESEARCH: Symbol discovery
+        - DEEP_NIGHT: News synthesis and briefing
+        - PRE_MARKET: Gap scanning
+        
+        Processes events from EventQueue:
+        - Price alerts (targets, stops, breakouts)
+        - News events
+        - Volume spikes
+        - Portfolio-level triggers
+        
+        EVENT-DRIVEN ARCHITECTURE: Replaces arbitrary 5-minute checks with
+        intelligent event-based triggers + market-hours awareness.
+        """
+        logger.info("="*70)
+        logger.info("🚀 Starting Event-Driven Trading System (Market-Hours Aware)")
+        logger.info("="*70)
+        logger.info("")
+        logger.info("📊 System Configuration:")
+        logger.info(f"   Symbols: {', '.join(self.symbols)}")
+        logger.info(f"   Dry run: {self.dry_run}")
+        logger.info(f"   Event queue: Active")
+        logger.info(f"   Memory store: Active")
+        logger.info(f"   Kelly sizing: Active")
+        logger.info(f"   Market hours manager: Active")
+        logger.info(f"   Symbol discovery: Active")
+        logger.info("")
+        
+        # Start monitoring current prices for alerts
+        self._start_price_monitoring()
+        
+        try:
+            event_count = 0
+            last_status_time = datetime.now()
+            last_phase_check = datetime.now()
+            current_phase = None
+            
+            while True:
+                # Check market phase every 5 minutes
+                now = datetime.now()
+                if (now - last_phase_check).total_seconds() > 300:
+                    new_phase = self.market_hours_manager.get_current_phase()
+                    
+                    if new_phase != current_phase:
+                        current_phase = new_phase
+                        logger.info("")
+                        logger.info("="*70)
+                        logger.info(f"📅 MARKET PHASE CHANGE: {current_phase.value.upper()}")
+                        logger.info("="*70)
+                        
+                        # Trigger phase-specific activities
+                        await self._handle_phase_change(current_phase)
+                    
+                    last_phase_check = now
+                
+                # Get next event (FIFO with priority)
+                event = self.event_queue.get_next_event()
+                
+                if event:
+                    event_count += 1
+                    logger.info("")
+                    logger.info(f"📬 Event #{event_count}: {event.event_type.value}")
+                    logger.info(f"   Symbol: {event.symbol}")
+                    logger.info(f"   Priority: {event.priority}")
+                    logger.info(f"   Source: {event.source}")
+                    logger.info(f"   Data: {event.data}")
+                    
+                    # Handle event
+                    await self._handle_event(event)
+                    
+                else:
+                    # No events - brief sleep then check again
+                    await asyncio.sleep(1)
+                    
+                    # Status update every 5 minutes when idle
+                    if (datetime.now() - last_status_time).total_seconds() > 300:
+                        self._log_event_queue_status()
+                        self._log_memory_status()
+                        last_status_time = datetime.now()
+        
+        except KeyboardInterrupt:
+            logger.info("")
+            logger.info("="*70)
+            logger.info("🛑 Event-Driven System Stopped")
+            logger.info("="*70)
+            self._log_event_queue_status()
+            self._log_memory_status()
+        
+        except Exception as e:
+            logger.error(f"❌ Fatal error in event-driven loop: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+    
+    async def _handle_phase_change(self, phase: MarketPhase):
+        """
+        Handle transition to new market phase (Phase 4).
+        
+        Triggers phase-specific activities:
+        - EVENING_RESEARCH: Run symbol discovery
+        - DEEP_NIGHT: Synthesize news and prepare briefing
+        - PRE_MARKET: Run gap scanner
+        - MARKET_OPEN: Resume normal event processing
+        - AFTER_HOURS: Daily learning and analysis
+        """
+        from wawatrader.event_system import EventType, EventPriority
+        
+        if phase == MarketPhase.EVENING_RESEARCH:
+            logger.info("🔍 Evening Research Phase - Running symbol discovery...")
+            try:
+                opportunities = self.symbol_discovery.discover_opportunities()
+                logger.info(f"✅ Discovered {len(opportunities)} opportunities")
+                
+                # Add opportunities to event queue
+                for opp in opportunities:
+                    event = Event(
+                        event_type=EventType.NEW_OPPORTUNITY,
+                        symbol=opp.symbol,
+                        priority=EventPriority.MEDIUM,
+                        source="symbol_discovery",
+                        data=opp.to_dict()
+                    )
+                    self.event_queue.add_event(event)
+                    
+            except Exception as e:
+                logger.error(f"❌ Symbol discovery failed: {e}")
+        
+        elif phase == MarketPhase.DEEP_NIGHT:
+            logger.info("💤 Deep Night Phase - News synthesis...")
+            # TODO: Implement overnight news synthesis
+            # This would use the overnight analyst to synthesize news
+            # and prepare morning briefing
+            logger.info("ℹ️  Overnight news synthesis not yet implemented")
+        
+        elif phase == MarketPhase.PRE_MARKET:
+            logger.info("🌅 Pre-Market Phase - Running gap scanner...")
+            try:
+                # Scan for pre-market gaps
+                gaps = self.symbol_discovery._scan_gap_opportunities()
+                logger.info(f"✅ Found {len(gaps)} gap opportunities")
+                
+                # Add gaps to event queue as high-priority
+                for gap in gaps:
+                    event = Event(
+                        event_type=EventType.GAP_DETECTED,
+                        symbol=gap.symbol,
+                        priority=EventPriority.HIGH,
+                        source="gap_scanner",
+                        data=gap.to_dict()
+                    )
+                    self.event_queue.add_event(event)
+                    
+            except Exception as e:
+                logger.error(f"❌ Gap scanner failed: {e}")
+        
+        elif phase == MarketPhase.MARKET_OPEN:
+            logger.info("🟢 Market Open - Processing events from queue...")
+            logger.info(f"   Current queue size: {self.event_queue.get_queue_size()}")
+        
+        elif phase == MarketPhase.AFTER_HOURS:
+            logger.info("📊 After Hours - Daily learning and analysis...")
+            # Could trigger end-of-day learning here
+            try:
+                self._generate_morning_insights()
+            except Exception as e:
+                logger.error(f"❌ Daily learning failed: {e}")
+
+    
+    def _start_price_monitoring(self):
+        """Start monitoring prices for alert triggers"""
+        logger.info("🔔 Starting price monitoring...")
+        logger.info(f"   Monitoring {len(self.symbols)} symbols for price alerts")
+        
+        # Schedule periodic price checks
+        # This will check prices and trigger events if alerts crossed
+        import threading
+        
+        def check_prices():
+            while True:
+                try:
+                    for symbol in self.symbols:
+                        # Get current price
+                        bars = self.alpaca.get_bars(symbol, "1Min", limit=1)
+                        if bars is not None and len(bars) > 0:
+                            current_price = bars['close'].iloc[-1]
+                            
+                            # Check price alerts
+                            self.price_monitor.check_price(symbol, current_price)
+                            
+                            # Check volume alerts
+                            volume = bars['volume'].iloc[-1]
+                            avg_volume = bars['volume'].mean() if len(bars) > 20 else volume
+                            self.volume_monitor.check_volume(symbol, volume, avg_volume)
+                    
+                    # Sleep between checks
+                    import time
+                    time.sleep(60)  # Check every minute
+                    
+                except Exception as e:
+                    logger.error(f"❌ Price monitoring error: {e}")
+                    import time
+                    time.sleep(60)
+        
+        # Start monitoring thread
+        monitor_thread = threading.Thread(target=check_prices, daemon=True)
+        monitor_thread.start()
+        logger.info("✅ Price monitoring started")
+    
+    async def _handle_event(self, event: 'Event'):
+        """
+        Handle a single event from the queue.
+        
+        Routes events to appropriate handlers based on type.
+        """
+        from wawatrader.event_system import EventType
+        
+        try:
+            # Route based on event type
+            if event.event_type == EventType.TARGET_HIT:
+                await self._handle_target_hit(event)
+            
+            elif event.event_type == EventType.STOP_LOSS_HIT:
+                await self._handle_stop_loss(event)
+            
+            elif event.event_type == EventType.BREAKOUT_UPSIDE:
+                await self._handle_breakout(event)
+            
+            elif event.event_type == EventType.BREAKDOWN_DOWNSIDE:
+                await self._handle_breakdown(event)
+            
+            elif event.event_type == EventType.VOLUME_SPIKE:
+                await self._handle_volume_spike(event)
+            
+            elif event.event_type == EventType.BREAKING_NEWS:
+                await self._handle_breaking_news(event)
+            
+            elif event.event_type == EventType.NEW_OPPORTUNITY:
+                await self._handle_new_opportunity(event)
+            
+            else:
+                logger.warning(f"⚠️ Unhandled event type: {event.event_type.value}")
+        
+        except Exception as e:
+            logger.error(f"❌ Error handling event {event.event_type.value}: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    async def _handle_target_hit(self, event: 'Event'):
+        """Handle target price hit event"""
+        logger.info(f"🎯 TARGET HIT: {event.symbol}")
+        
+        # Get position memory
+        memory = self.memory_store.get_open_position(event.symbol)
+        if not memory:
+            logger.warning(f"⚠️ No memory found for {event.symbol}")
+            return
+        
+        # Re-evaluate with thesis vs reality
+        analysis = self.analyze_symbol(event.symbol)
+        if not analysis:
+            return
+        
+        decision = self.make_decision(analysis)
+        
+        # Log decision
+        self.log_decision(decision)
+        
+        # Execute if approved
+        if decision.risk_approved and decision.action == 'sell':
+            self.execute_decision(decision)
+    
+    async def _handle_stop_loss(self, event: 'Event'):
+        """Handle stop loss hit - CRITICAL priority exit"""
+        logger.error(f"🚨 STOP LOSS HIT: {event.symbol}")
+        
+        # Emergency exit - bypass normal decision making
+        if event.symbol in self.positions:
+            pos = self.positions[event.symbol]
+            qty = abs(int(float(pos['qty'])))
+            
+            if qty > 0:
+                # Create emergency sell decision
+                from wawatrader.trading_agent import TradingDecision
+                
+                decision = TradingDecision(
+                    timestamp=datetime.now().isoformat(),
+                    symbol=event.symbol,
+                    action='sell',
+                    shares=qty,
+                    price=event.data.get('current_price', 0),
+                    confidence=100,
+                    sentiment='bearish',
+                    reasoning=f"Stop loss triggered at ${event.data.get('stop_price', 0):.2f}",
+                    risk_approved=True,
+                    risk_reason="Emergency stop loss exit",
+                    executed=False
+                )
+                
+                # Execute immediately
+                self.execute_decision(decision)
+                logger.info(f"✅ Emergency exit executed for {event.symbol}")
+    
+    async def _handle_breakout(self, event: 'Event'):
+        """Handle breakout above resistance"""
+        logger.info(f"📈 BREAKOUT: {event.symbol}")
+        
+        # Analyze for potential entry
+        analysis = self.analyze_symbol(event.symbol)
+        if not analysis:
+            return
+        
+        decision = self.make_decision(analysis)
+        self.log_decision(decision)
+        
+        if decision.risk_approved:
+            self.execute_decision(decision)
+    
+    async def _handle_breakdown(self, event: 'Event'):
+        """Handle breakdown below support"""
+        logger.info(f"📉 BREAKDOWN: {event.symbol}")
+        
+        # If we have position, consider exit
+        if event.symbol in self.positions:
+            analysis = self.analyze_symbol(event.symbol)
+            if analysis:
+                decision = self.make_decision(analysis)
+                self.log_decision(decision)
+                if decision.risk_approved:
+                    self.execute_decision(decision)
+    
+    async def _handle_volume_spike(self, event: 'Event'):
+        """Handle unusual volume spike"""
+        logger.info(f"📊 VOLUME SPIKE: {event.symbol} ({event.data.get('ratio', 0):.1f}x)")
+        
+        # Analyze for opportunity
+        analysis = self.analyze_symbol(event.symbol)
+        if not analysis:
+            return
+        
+        decision = self.make_decision(analysis)
+        self.log_decision(decision)
+        
+        if decision.risk_approved:
+            self.execute_decision(decision)
+    
+    async def _handle_breaking_news(self, event: 'Event'):
+        """Handle breaking news event"""
+        logger.info(f"📰 BREAKING NEWS: {event.symbol}")
+        logger.info(f"   {event.data.get('headline', 'No headline')}")
+        
+        # Re-evaluate position or analyze for entry
+        analysis = self.analyze_symbol(event.symbol)
+        if not analysis:
+            return
+        
+        decision = self.make_decision(analysis)
+        self.log_decision(decision)
+        
+        if decision.risk_approved:
+            self.execute_decision(decision)
+    
+    async def _handle_new_opportunity(self, event: 'Event'):
+        """Handle new opportunity discovered"""
+        logger.info(f"💡 NEW OPPORTUNITY: {event.symbol}")
+        logger.info(f"   Quality: {event.data.get('quality_score', 0)}/100")
+        
+        # Analyze opportunity
+        analysis = self.analyze_symbol(event.symbol)
+        if not analysis:
+            return
+        
+        decision = self.make_decision(analysis)
+        self.log_decision(decision)
+        
+        if decision.risk_approved:
+            self.execute_decision(decision)
+    
+    def _log_event_queue_status(self):
+        """Log current event queue status"""
+        status = self.event_queue.get_queue_status()
+        
+        logger.info("")
+        logger.info("📊 Event Queue Status:")
+        logger.info(f"   Pending: {status['pending_count']}")
+        logger.info(f"   Processed: {status['total_processed']}")
+        logger.info(f"   By Priority: {status['priority_breakdown']}")
+        logger.info(f"   By Symbol: {status['symbol_breakdown']}")
+    
+    def _log_memory_status(self):
+        """Log current memory store status"""
+        open_positions = self.memory_store.get_all_open_positions()
+        
+        logger.info("")
+        logger.info("💾 Memory Store Status:")
+        logger.info(f"   Open Positions: {len(open_positions)}")
+        
+        for pos in open_positions[:5]:
+            pnl_pct = ((self.positions.get(pos.symbol, {}).get('current_price', pos.entry_price) - pos.entry_price) / pos.entry_price) * 100
+            logger.info(f"   - {pos.symbol}: {pos.strategy}, ${pos.entry_price:.2f} ({pnl_pct:+.2f}%)")
     
     def start_position_monitoring(self):
         """Start the PositionManager background monitoring"""

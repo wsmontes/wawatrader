@@ -39,6 +39,8 @@ import asyncio
 
 try:
     from dash import Dash, html, dcc, Input, Output, dash_table, callback, ctx, State, ALL
+    from dash.exceptions import PreventUpdate
+    from dash import callback_context
     import dash_bootstrap_components as dbc
     import plotly.express as px
     DASH_AVAILABLE = True
@@ -47,6 +49,8 @@ except ImportError:
     try:
         # Try importing just the core components
         from dash import Dash, html, dcc, Input, Output, callback, ctx, State, ALL
+        from dash.exceptions import PreventUpdate
+        from dash import callback_context
         import plotly.express as px
         DASH_AVAILABLE = True
         MODAL_AVAILABLE = False
@@ -875,6 +879,14 @@ class Dashboard:
                             min-height: 300px;
                         }
                     }
+                    
+                    /* Position Card Hover Effects */
+                    .position-card:hover {
+                        background: var(--bg-tertiary) !important;
+                        border-color: var(--accent-blue) !important;
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 8px rgba(0, 170, 255, 0.2);
+                    }
                 </style>
                 <script>
                     // Modal and tab management
@@ -1069,12 +1081,14 @@ class Dashboard:
                 
                 html.Div([
                     html.Div("LIVE", className="status-badge status-live"),
+                    html.Div("📊 Alpaca Paper", className="status-badge",
+                            style={"background": "var(--bg-tertiary)", "color": "#00aaff", "fontWeight": "500", "fontSize": "11px"}),
                     html.Div(id="market-status", className="status-badge",
                             style={"background": "var(--bg-tertiary)", "fontWeight": "600"}),
                     html.Div(id="market-state", className="status-badge",
                             style={"background": "var(--bg-tertiary)", "color": "var(--text-secondary)", "fontSize": "11px"}),
-                    html.Div(id="system-time", className="status-badge", 
-                            style={"background": "var(--bg-tertiary)", "color": "var(--text-secondary)"}),
+                    html.Div(id="market-time", className="status-badge", 
+                            style={"background": "var(--bg-tertiary)", "color": "var(--text-secondary)", "fontFamily": "JetBrains Mono"}),
                     html.Div(id="pnl-header", className="status-badge",
                             style={"background": "var(--bg-tertiary)", "fontFamily": "JetBrains Mono"}),
                     html.Button([
@@ -1222,8 +1236,24 @@ class Dashboard:
                 html.Div([
                     html.Div([
                         html.I(className="fas fa-chart-candlestick", style={"marginRight": "8px", "color": "var(--accent-blue)"}),
-                        html.H5("AAPL - Live Trading Chart", style={"margin": "0", "color": "var(--accent-blue)", "fontSize": "14px"}),
-                        html.Div("📊 IEX Real-Time Data", style={"fontSize": "10px", "color": "var(--text-muted)", "marginLeft": "auto"})
+                        html.H5(id="chart-title", children="Market Overview", style={"margin": "0", "color": "var(--accent-blue)", "fontSize": "14px"}),
+                        
+                        # Stock selector dropdown
+                        html.Div([
+                            dcc.Dropdown(
+                                id='stock-selector',
+                                options=[],  # Will be populated by callback
+                                value='SPY',  # Default to SPY
+                                placeholder="Select stock...",
+                                clearable=False,
+                                style={
+                                    "width": "150px",
+                                    "fontSize": "11px"
+                                }
+                            )
+                        ], style={"marginLeft": "auto", "marginRight": "12px"}),
+                        
+                        html.Div("📊 IEX Real-Time Data", style={"fontSize": "10px", "color": "var(--text-muted)"})
                     ], style={"display": "flex", "alignItems": "center", "padding": "12px 16px", "borderBottom": "1px solid var(--border-color)"}),
                     
                     dcc.Graph(
@@ -1240,7 +1270,10 @@ class Dashboard:
                             "minHeight": "350px",  # Ensure minimum chart height
                             "flex": "1"  # Take up available space
                         }
-                    )
+                    ),
+                    
+                    # Hidden div to store selected symbol from position card clicks
+                    html.Div(id='selected-symbol-store', style={'display': 'none'})
                 ], className="chart-panel"),
                 
                 # Bottom Right Container - Performance and Positions side by side
@@ -1329,12 +1362,38 @@ class Dashboard:
         
         # Split into separate callbacks to avoid Dash multi-output bug
         @self.app.callback(
-            Output('system-time', 'children'),
+            Output('market-time', 'children'),
             [Input('main-interval', 'n_intervals')]
         )
-        def update_system_time(n):
-            """Update system time"""
-            return datetime.now().strftime("%H:%M:%S")
+        def update_market_time(n):
+            """Update market time (EDT/EST)"""
+            from datetime import timezone, timedelta
+            
+            # ET is UTC-5 (EST) or UTC-4 (EDT)
+            # Simple DST check: DST is second Sunday in March to first Sunday in November
+            now_utc = datetime.now(timezone.utc)
+            year = now_utc.year
+            
+            # Calculate DST boundaries
+            dst_start = datetime(year, 3, 8, 2, tzinfo=timezone(timedelta(hours=-5)))  # Second Sunday March
+            while dst_start.weekday() != 6:  # Sunday
+                dst_start = datetime(year, 3, dst_start.day + 1, 2, tzinfo=timezone(timedelta(hours=-5)))
+            
+            dst_end = datetime(year, 11, 1, 2, tzinfo=timezone(timedelta(hours=-4)))  # First Sunday November
+            while dst_end.weekday() != 6:
+                dst_end = datetime(year, 11, dst_end.day + 1, 2, tzinfo=timezone(timedelta(hours=-4)))
+            
+            # Determine if DST is active
+            is_dst = dst_start <= now_utc.replace(tzinfo=None).replace(tzinfo=timezone.utc) < dst_end
+            
+            # Convert to ET
+            et_offset = timedelta(hours=-4 if is_dst else -5)
+            market_time = now_utc.astimezone(timezone(et_offset))
+            
+            time_str = market_time.strftime("%H:%M:%S")
+            tz_str = "EDT" if is_dst else "EST"
+            
+            return f"🕐 {time_str} {tz_str}"
         
         @self.app.callback(
             [Output('market-status', 'children'),
@@ -1433,18 +1492,19 @@ class Dashboard:
         
         @self.app.callback(
             Output('main-chart', 'figure'),
-            [Input('main-interval', 'n_intervals')]
+            [Input('stock-selector', 'value'),
+             Input('main-interval', 'n_intervals')]
         )
-        def update_main_chart(n):
-            """Update main candlestick chart with professional styling"""
+        def update_main_chart(selected_symbol, n):
+            """Update main candlestick chart based on selected symbol"""
             try:
-                # Get price data for primary symbol (AAPL as example)
-                symbol = "AAPL"
+                # Use selected symbol or default to SPY
+                symbol = selected_symbol if selected_symbol else "SPY"
                 
                 # Try to get recent data, fall back to daily data if subscription doesn't allow
                 bars = None
                 try:
-                    bars = self.alpaca.get_bars(symbol, limit=100, timeframe='1Day')  # Start with daily for reliability
+                    bars = self.alpaca.get_bars(symbol, limit=100, timeframe='1Day')
                     logger.debug(f"Retrieved {len(bars) if not bars.empty else 0} daily bars for {symbol}")
                     if bars.empty:
                         raise ValueError("Empty daily data")
@@ -1490,7 +1550,7 @@ class Dashboard:
                     showlegend=False
                 ))
                 
-                # Professional chart styling with improved responsive layout
+                # Professional chart styling
                 fig.update_layout(
                     plot_bgcolor='rgba(0,0,0,0)',
                     paper_bgcolor='rgba(0,0,0,0)',
@@ -1502,7 +1562,7 @@ class Dashboard:
                         color='#cccccc',
                         showticklabels=True,
                         tickfont=dict(size=10),
-                        fixedrange=False  # Allow zooming
+                        fixedrange=False
                     ),
                     yaxis=dict(
                         title=dict(text="Price ($)", font=dict(size=11)),
@@ -1513,7 +1573,7 @@ class Dashboard:
                         side='right',
                         tickfont=dict(size=10),
                         tickformat=',.2f',
-                        fixedrange=False  # Allow zooming
+                        fixedrange=False
                     ),
                     yaxis2=dict(
                         title=dict(text="Volume", font=dict(size=10)),
@@ -1526,29 +1586,16 @@ class Dashboard:
                         fixedrange=False
                     ),
                     showlegend=False,
-                    margin=dict(l=60, r=60, t=10, b=30),  # Reduced margins for better space usage
+                    margin=dict(l=60, r=60, t=10, b=30),
                     hovermode='x unified',
                     hoverlabel=dict(
                         bgcolor='rgba(42, 42, 42, 0.9)',
                         bordercolor='rgba(255, 255, 255, 0.2)',
                         font=dict(color='white', family='JetBrains Mono', size=10)
                     ),
-                    autosize=True,  # Enable automatic sizing
-                    height=None,    # Let container control height
-                    dragmode='pan'  # Set default drag mode
-                )
-                
-                # Add LLM decision annotations (example)
-                fig.add_annotation(
-                    x=bars.index[-10],
-                    y=bars['high'].iloc[-10],
-                    text="🤖 BUY Signal<br>Confidence: 85%",
-                    showarrow=True,
-                    arrowhead=2,
-                    arrowcolor='#00ff88',
-                    bgcolor='rgba(0, 255, 136, 0.1)',
-                    bordercolor='#00ff88',
-                    font=dict(color='#00ff88', size=10)
+                    autosize=True,
+                    height=None,
+                    dragmode='pan'
                 )
                 
                 return fig
@@ -1556,6 +1603,89 @@ class Dashboard:
             except Exception as e:
                 logger.error(f"Error updating main chart: {e}")
                 return self._create_empty_chart("Chart Error")
+        
+        @self.app.callback(
+            [Output('stock-selector', 'options'),
+             Output('chart-title', 'children')],
+            [Input('main-interval', 'n_intervals'),
+             Input('stock-selector', 'value')]
+        )
+        def update_stock_selector(n, selected_symbol):
+            """Update stock selector dropdown with current positions + indices"""
+            try:
+                options = []
+                
+                # Add market indices
+                indices = [
+                    {'label': '📊 SPY (S&P 500)', 'value': 'SPY'},
+                    {'label': '📊 QQQ (NASDAQ)', 'value': 'QQQ'},
+                    {'label': '📊 DIA (Dow Jones)', 'value': 'DIA'}
+                ]
+                options.extend(indices)
+                
+                # Add current positions
+                if self.trading_agent and hasattr(self.trading_agent, 'positions'):
+                    positions = self.trading_agent.positions
+                    if positions:
+                        options.append({'label': '─────', 'value': '', 'disabled': True})
+                        for symbol in sorted(positions.keys()):
+                            pos = positions[symbol]
+                            pnl = float(pos.get('unrealized_pl', 0))
+                            pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+                            options.append({
+                                'label': f'{pnl_emoji} {symbol} (${pnl:+,.0f})',
+                                'value': symbol
+                            })
+                
+                # Update chart title
+                if selected_symbol:
+                    title = f"{selected_symbol} - Live Chart"
+                else:
+                    title = "Market Overview"
+                
+                return options, title
+                
+            except Exception as e:
+                logger.error(f"Error updating stock selector: {e}")
+                return [{'label': 'SPY', 'value': 'SPY'}], "Market Overview"
+        
+        @self.app.callback(
+            Output('stock-selector', 'value'),
+            [Input({'type': 'position-card', 'symbol': ALL}, 'n_clicks')],
+            [State({'type': 'position-card', 'symbol': ALL}, 'id')],
+            prevent_initial_call=True
+        )
+        def position_card_clicked(n_clicks_list, ids_list):
+            """Handle position card clicks to update chart"""
+            try:
+                # Check if we have any clicks and IDs
+                if not n_clicks_list or not ids_list or not any(n_clicks_list):
+                    raise PreventUpdate
+                
+                # Find which card was clicked (most recent click)
+                ctx = callback_context
+                if not ctx.triggered or not ctx.triggered[0]['prop_id']:
+                    raise PreventUpdate
+                
+                # Get the symbol from the triggered component
+                triggered_prop = ctx.triggered[0]['prop_id']
+                if '.' not in triggered_prop:
+                    raise PreventUpdate
+                    
+                triggered_id = triggered_prop.split('.')[0]
+                if triggered_id:
+                    import json
+                    card_id = json.loads(triggered_id)
+                    symbol = card_id.get('symbol')
+                    if symbol:
+                        logger.info(f"📊 Position card clicked: switching chart to {symbol}")
+                        return symbol
+                
+                raise PreventUpdate
+                
+            except Exception as e:
+                logger.debug(f"Position card click handler: {e}")
+                raise PreventUpdate
         
         @self.app.callback(
             Output('llm-tab-content', 'children'),
@@ -2391,10 +2521,12 @@ class Dashboard:
                     equity = float(account.get('equity', 100000))
                     last_equity = float(account.get('last_equity', equity))
                     buying_power = float(account.get('buying_power', 0))
+                    cash = float(account.get('cash', 0))
                 else:
                     equity = float(account.equity)
                     last_equity = float(account.last_equity)
                     buying_power = float(account.buying_power)
+                    cash = float(account.cash)
                 
                 pnl = equity - last_equity
                 
@@ -2418,7 +2550,7 @@ class Dashboard:
                         ], className="compact-metric"),
                         html.Div([
                             html.Div("Cash Avail", className="compact-label"),
-                            html.Div(f"${buying_power*0.25:,.0f}", className="compact-value neutral")  # Rough estimate
+                            html.Div(f"${cash:,.0f}", className="compact-value neutral")
                         ], className="compact-metric")
                     ], className="compact-grid")
                 ]
@@ -2429,27 +2561,76 @@ class Dashboard:
                     position_cards = []
                     
                     if positions and len(positions) > 0:
-                        for pos in positions[:5]:  # Top 5 positions
+                        for pos in positions[:10]:  # Top 10 positions (increased from 5)
                             # Handle both dict and object responses
                             if isinstance(pos, dict):
                                 symbol = pos.get('symbol', 'UNKNOWN')
-                                qty = pos.get('qty', 0)
+                                qty = float(pos.get('qty', 0))
+                                current_price = float(pos.get('current_price', 0))
+                                avg_entry = float(pos.get('avg_entry_price', 0))
                                 pnl = float(pos.get('unrealized_pl', 0))
+                                pnl_pct = float(pos.get('unrealized_plpc', 0)) * 100
                             else:
                                 symbol = pos.symbol
-                                qty = pos.qty
+                                qty = float(pos.qty)
+                                current_price = float(pos.current_price)
+                                avg_entry = float(pos.avg_entry_price)
                                 pnl = float(pos.unrealized_pl)
-                                
+                                pnl_pct = float(pos.unrealized_plpc) * 100
+                            
+                            # Calculate hold duration from order history
+                            try:
+                                entry_time = self.trading_agent.alpaca.get_position_entry_time(symbol)
+                                if entry_time:
+                                    from datetime import datetime, timezone
+                                    now = datetime.now(timezone.utc)
+                                    duration = now - entry_time
+                                    
+                                    # Format duration nicely
+                                    days = duration.days
+                                    hours = duration.seconds // 3600
+                                    minutes = (duration.seconds % 3600) // 60
+                                    
+                                    if days > 0:
+                                        hold_duration = f"{days}d {hours}h"
+                                    elif hours > 0:
+                                        hold_duration = f"{hours}h {minutes}m"
+                                    else:
+                                        hold_duration = f"{minutes}m"
+                                else:
+                                    hold_duration = "N/A"
+                            except Exception as e:
+                                hold_duration = "N/A"
+                            
                             pnl_color = "positive" if pnl >= 0 else "negative"
+                            price_change = current_price - avg_entry
                             
                             position_cards.append(
                                 html.Div([
+                                    # Header row: Symbol and quantity
                                     html.Div([
-                                        html.Span(symbol, style={"fontWeight": "bold", "fontSize": "12px", "color": "var(--accent-blue)"}),
-                                        html.Span(f" {qty}", style={"fontSize": "10px", "color": "var(--text-muted)", "marginLeft": "6px"})
-                                    ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
-                                    html.Div(f"${pnl:+,.0f}", className=f"compact-value {pnl_color}", style={"fontSize": "11px", "textAlign": "right"})
-                                ], style={"background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "borderRadius": "4px", "padding": "6px 8px", "margin": "3px 0"})
+                                        html.Span(symbol, style={"fontWeight": "bold", "fontSize": "13px", "color": "var(--accent-blue)"}),
+                                        html.Span(f"{int(qty)} sh", style={"fontSize": "10px", "color": "var(--text-muted)", "marginLeft": "auto"})
+                                    ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "4px"}),
+                                    
+                                    # Prices row
+                                    html.Div([
+                                        html.Span(f"Entry: ${avg_entry:.2f}", style={"fontSize": "10px", "color": "var(--text-muted)"}),
+                                        html.Span(f"Now: ${current_price:.2f}", style={"fontSize": "10px", "color": "var(--text-secondary)", "marginLeft": "8px"}),
+                                        html.Span(f"{price_change:+.2f}", className=f"{pnl_color}", style={"fontSize": "10px", "marginLeft": "auto", "fontWeight": "500"})
+                                    ], style={"display": "flex", "alignItems": "center", "marginBottom": "4px"}),
+                                    
+                                    # P&L row
+                                    html.Div([
+                                        html.Span(f"${pnl:+,.0f}", className=f"compact-value {pnl_color}", style={"fontSize": "12px", "fontWeight": "600"}),
+                                        html.Span(f"({pnl_pct:+.1f}%)", className=f"{pnl_color}", style={"fontSize": "10px", "marginLeft": "6px"}),
+                                        html.Span(f"⏱ {hold_duration}", style={"fontSize": "9px", "color": "var(--text-muted)", "marginLeft": "auto"})
+                                    ], style={"display": "flex", "alignItems": "center"})
+                                ], 
+                                id={'type': 'position-card', 'symbol': symbol},  # Make clickable with ID
+                                n_clicks=0,
+                                style={"background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "borderRadius": "4px", "padding": "8px", "margin": "4px 0", "cursor": "pointer", "transition": "all 0.2s"}, 
+                                className="position-card")
                             )
                     else:
                         position_cards = [

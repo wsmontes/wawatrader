@@ -109,19 +109,34 @@ class MarketHoursManager:
         """
         current_time = now_market().time()
         
-        # Check if market is actually open (handles holidays)
+        # Check if market is actually open (handles holidays, early closes)
         try:
             market_status = self.alpaca.get_market_status()
-            if market_status.get('is_open', False):
+            is_open = market_status.get('is_open', False)
+            
+            # Trust Alpaca API - if it says closed, market is closed
+            if not is_open:
+                # Market is closed - determine which off-hours phase
+                if time(4, 0) <= current_time < time(9, 30):
+                    return MarketPhase.PRE_MARKET
+                elif time(16, 0) <= current_time < time(20, 0):
+                    return MarketPhase.AFTER_HOURS
+                elif time(20, 0) <= current_time < time(23, 0):
+                    return MarketPhase.EVENING_RESEARCH
+                else:  # 23:00 - 4:00
+                    return MarketPhase.DEEP_NIGHT
+            else:
+                # Market is actually open
                 return MarketPhase.MARKET_OPEN
+                
         except Exception as e:
-            logger.warning(f"Could not check market status: {e}")
+            logger.warning(f"Could not check market status: {e} - using time-based fallback")
         
-        # Define phase boundaries (all ET)
+        # Fallback to time-based logic only if API fails completely
         if time(4, 0) <= current_time < time(9, 30):
             return MarketPhase.PRE_MARKET
         elif time(9, 30) <= current_time < time(16, 0):
-            return MarketPhase.MARKET_OPEN  # Fallback if API fails
+            return MarketPhase.MARKET_OPEN  # Best guess if API unavailable
         elif time(16, 0) <= current_time < time(20, 0):
             return MarketPhase.AFTER_HOURS
         elif time(20, 0) <= current_time < time(23, 0):

@@ -47,27 +47,20 @@ class TechnicalDataComponent(PromptComponent):
         has_nested_price = isinstance(signals.get('price'), dict)
         has_nested_trend = isinstance(signals.get('trend'), dict)
         
-        if has_nested_price:
-            # Nested structure (from get_latest_signals) - price is dict
+        if has_nested_price or has_nested_trend:
+            # Nested structure (from get_latest_signals)
             price_data = signals.get('price', {})
             trend_data = signals.get('trend', {})
             momentum_data = signals.get('momentum', {})
             volume_data = signals.get('volume', {})
             current_price = price_data.get('close', price_data.get('price', 0)) if isinstance(price_data, dict) else 0
         else:
-            # Flat structure or mixed - price is a scalar
+            # Flat structure (from _signals_to_technical_data)
+            price_data = signals
+            trend_data = signals
+            momentum_data = signals
+            volume_data = signals
             current_price = signals.get('price', signals.get('close', 0))
-            
-            if has_nested_trend:
-                # Mixed: price is flat but trend/momentum/volume are nested
-                trend_data = signals.get('trend', {})
-                momentum_data = signals.get('momentum', {})
-                volume_data = signals.get('volume', {})
-            else:
-                # Fully flat structure (from _signals_to_technical_data)
-                trend_data = signals
-                momentum_data = signals
-                volume_data = signals
         
         symbol = self.context.primary_symbol if self.context else 'UNKNOWN'
         
@@ -268,115 +261,5 @@ Available Cash: ${cash:,.2f}
 Today's P/L: ${pl_today:+,.2f}
 Total P/L: ${pl_total:+,.2f}
 """
-        
-        return output
-
-
-class PortfolioSummaryComponent(PromptComponent):
-    """Overall portfolio state and context"""
-    
-    def __init__(self, data: Dict[str, Any], **kwargs):
-        super().__init__(data, **kwargs)
-        self.priority = 7
-    
-    def is_relevant(self, context: QueryContext) -> bool:
-        """Relevant for portfolio-level queries"""
-        return context.query_type in [
-            QueryContext.PORTFOLIO_AUDIT,
-            QueryContext.RISK_ASSESSMENT,
-        ] or context.trigger == QueryContext.CAPITAL_CONSTRAINT
-    
-    def render(self) -> str:
-        if not self.validate_data():
-            return ""
-        
-        portfolio = self.data
-        total_value = portfolio.get('total_value', 0)
-        buying_power = portfolio.get('buying_power', 0)
-        num_positions = portfolio.get('num_positions', 0)
-        daily_pnl = portfolio.get('daily_pnl', 0)
-        daily_pnl_pct = portfolio.get('daily_pnl_pct', 0)
-        
-        bp_pct = (buying_power / total_value * 100) if total_value > 0 else 0
-        
-        if bp_pct < 1:
-            capital_status = "🔴 CRITICAL - Nearly fully invested"
-        elif bp_pct < 5:
-            capital_status = "🟠 CONSTRAINED - Very limited dry powder"
-        elif bp_pct < 10:
-            capital_status = "🟡 LOW - Limited buying power"
-        elif bp_pct < 25:
-            capital_status = "🟢 MODERATE - Reasonable flexibility"
-        else:
-            capital_status = "💚 HIGH - Significant dry powder"
-        
-        top_symbols = portfolio.get('top_3_symbols', [])
-        top_holdings_text = ""
-        if top_symbols:
-            top_holdings_text = f"   • Top Holdings: {', '.join(top_symbols)}\n"
-        
-        output = f"""
-💼 PORTFOLIO STATE
-{'=' * 70}
-   • Total Value: ${total_value:,.0f}
-   • Buying Power: ${buying_power:,.0f} ({bp_pct:.1f}%)
-   • Positions: {num_positions}
-{top_holdings_text}   • Today's P&L: {daily_pnl_pct:+.2f}% (${daily_pnl:+,.0f})
-
-📊 Capital Status: {capital_status}
-"""
-        return output
-
-
-class NewsComponent(PromptComponent):
-    """Recent news with relevance filtering"""
-    
-    def __init__(self, data: Dict[str, Any], **kwargs):
-        super().__init__(data, **kwargs)
-        self.priority = 5
-    
-    def is_relevant(self, context: QueryContext) -> bool:
-        """Only include news for specific query types"""
-        return (
-            context.include_news and
-            context.query_type in [
-                QueryContext.NEW_OPPORTUNITY,
-                QueryContext.POSITION_REVIEW,
-                QueryContext.COMPARATIVE_ANALYSIS,
-            ]
-        )
-    
-    def render(self) -> str:
-        if not self.validate_data():
-            return ""
-        
-        if isinstance(self.data, list):
-            news_items = self.data
-        elif isinstance(self.data, dict):
-            news_items = self.data.get('articles', self.data.get('news', []))
-        else:
-            return ""
-        
-        if not news_items:
-            return ""
-        
-        output = f"""
-📰 MARKET CONTEXT (30% Decision Weight)
-{'=' * 70}
-Recent news (context only - don't override strong technical signals):
-
-"""
-        
-        for article in news_items[:3]:
-            if isinstance(article, dict):
-                headline = article.get('headline', article.get('title', ''))
-                if headline:
-                    headline_short = headline[:100] + "..." if len(headline) > 100 else headline
-                    output += f"   • {headline_short}\n"
-            elif isinstance(article, str):
-                headline_short = article[:100] + "..." if len(article) > 100 else article
-                output += f"   • {headline_short}\n"
-        
-        output += "\n⚠️  Technical signals (70% weight) should take priority over news\n"
         
         return output
