@@ -53,25 +53,110 @@ class ScheduledTaskHandlers:
     
     def trading_cycle(self) -> Dict[str, Any]:
         """
-        Execute regular trading cycle.
+        Execute coordinated trading cycle with streaming decision management.
+        
+        NEW APPROACH:
+        - Individual LLM analysis (preserve quality)
+        - Streaming coordination (immediate execution of urgent decisions)
+        - Mathematical prioritization (optimal execution order)
         
         Returns:
-            Execution summary
+            Execution summary with coordination statistics
         """
-        logger.info("🟢 Executing trading cycle...")
+        logger.info("🟢 Executing COORDINATED trading cycle...")
         
-        # NEW: Check if we need to reset daily metrics (new trading day)
+        # Check if we need to reset daily metrics (new trading day)
         today = datetime.now().date()
         if self.agent.last_reset_date is None or self.agent.last_reset_date.date() != today:
             logger.info("📅 New trading day detected - resetting daily metrics")
             self.agent.reset_daily_metrics()
         
         try:
-            self.agent.run_cycle()
-            return {"status": "success", "task": "trading_cycle"}
+            # Initialize streaming coordinator for this cycle
+            from wawatrader.streaming_coordinator import StreamingPortfolioCoordinator
+            coordinator = StreamingPortfolioCoordinator(self.agent)
+            
+            logger.info(f"🎯 Analyzing {len(self.agent.symbols)} symbols with streaming coordination...")
+            
+            # Update account state first
+            self.agent.update_account_state()
+            
+            # Check for emergency liquidation
+            liquidation_check = self.agent.risk_manager.check_emergency_liquidation(
+                current_pnl=self.agent.current_pnl,
+                account_value=self.agent.account_value
+            )
+            
+            if liquidation_check['liquidate']:
+                logger.error("🚨 EMERGENCY LIQUIDATION - Coordinated cycle aborted")
+                self.agent._emergency_liquidate_all()
+                return {"status": "emergency_liquidation", "task": "trading_cycle"}
+            
+            # Check market status
+            market_status = self.agent.alpaca.get_market_status()
+            if not market_status.get('is_open', False):
+                logger.info("💤 Market closed - trading cycle skipped")
+                return {"status": "market_closed", "task": "trading_cycle"}
+            
+            # COORDINATED ANALYSIS: Individual LLM + Streaming Execution
+            successful_analyses = 0
+            failed_analyses = 0
+            
+            for symbol in self.agent.symbols:
+                try:
+                    logger.debug(f"📊 Analyzing {symbol}...")
+                    
+                    # Individual LLM analysis (unchanged - preserves quality)
+                    analysis = self.agent.analyze_symbol(symbol)
+                    if not analysis:
+                        logger.warning(f"⚠️ Analysis failed for {symbol}")
+                        failed_analyses += 1
+                        continue
+                    
+                    # Make decision using existing logic
+                    decision = self.agent.make_decision(analysis)
+                    
+                    # COORDINATION: Pass decision to streaming coordinator
+                    # (This is where the magic happens - smart execution order)
+                    coordinator.process_decision(decision)
+                    
+                    successful_analyses += 1
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error analyzing {symbol}: {e}")
+                    failed_analyses += 1
+                    continue
+            
+            # Finalize any remaining decisions
+            coordination_stats = coordinator.finalize_cycle()
+            
+            logger.info("🏆 COORDINATED CYCLE COMPLETE")
+            logger.info(f"   Analyzed: {successful_analyses} successful, {failed_analyses} failed")
+            logger.info(f"   Executed: {coordination_stats['immediate_executions']} immediate, "
+                       f"{coordination_stats['batch_executions']} batch")
+            logger.info(f"   Skipped: {coordination_stats['skipped_capital']} (capital limit)")
+            
+            return {
+                "status": "success", 
+                "task": "coordinated_trading_cycle",
+                "analyses": {
+                    "successful": successful_analyses,
+                    "failed": failed_analyses
+                },
+                "coordination": coordination_stats
+            }
+            
         except Exception as e:
-            logger.error(f"Trading cycle failed: {e}")
-            return {"status": "error", "task": "trading_cycle", "error": str(e)}
+            logger.error(f"❌ Coordinated trading cycle failed: {e}")
+            
+            # Fallback to original sequential method
+            logger.info("🔄 Falling back to sequential trading cycle...")
+            try:
+                self.agent.run_cycle()
+                return {"status": "fallback_success", "task": "trading_cycle"}
+            except Exception as fallback_e:
+                logger.error(f"❌ Fallback also failed: {fallback_e}")
+                return {"status": "error", "task": "trading_cycle", "error": str(e)}
     
     def quick_intelligence(self) -> Dict[str, Any]:
         """

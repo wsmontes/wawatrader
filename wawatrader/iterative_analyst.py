@@ -102,12 +102,14 @@ class IterativeAnalyst:
             })
             
             # Check if LLM has final recommendation or wants more data
-            if parsed.get('status') == 'final':
-                logger.success(f"   ✅ Final recommendation reached")
+            status = parsed.get('status', '').lower()
+            
+            if status in ['final', 'complete', 'done', 'finished']:
+                logger.success(f"   ✅ Final recommendation reached (status: {status})")
                 final_recommendation = parsed.get('recommendation', {})
                 break
-            
-            elif parsed.get('status') == 'need_more_data':
+
+            elif status in ['need_more_data', 'more_data', 'continue', 'request_data']:
                 # LLM wants more information
                 requested_data = parsed.get('data_requests', [])
                 logger.info(f"   📊 LLM requesting: {', '.join(requested_data)}")
@@ -129,11 +131,31 @@ class IterativeAnalyst:
                     additional_data
                 )
             
-            else:
-                logger.warning(f"   ⚠️  Unclear LLM response status")
+            elif status == 'error':
+                logger.error(f"   ❌ LLM reported error: {parsed.get('message', 'Unknown error')}")
                 break
-        
-        # Compile final result
+            
+            else:
+                # More robust handling of unclear status
+                logger.warning(f"   ⚠️  Unclear LLM response status: '{status}'")
+                logger.debug(f"   📄 Raw response preview: {str(parsed)[:200]}...")
+                
+                # Try to extract useful information even with unclear status
+                if parsed.get('recommendation'):
+                    logger.info(f"   🔄 Found recommendation despite unclear status, treating as final")
+                    final_recommendation = parsed.get('recommendation', {})
+                    break
+                elif iteration >= self.max_iterations - 1:
+                    logger.warning(f"   ⏰ Max iterations reached, stopping analysis")
+                    break
+                else:
+                    logger.info(f"   🔄 Continuing analysis despite unclear status")
+                    # Continue with current context
+                    current_prompt = self._build_followup_prompt(
+                        symbol, 
+                        conversation_history,
+                        {}
+                    )        # Compile final result
         result = {
             'symbol': symbol,
             'timestamp': datetime.now().isoformat(),
@@ -235,7 +257,7 @@ What do you see in this new data? Do you need anything else?
         return summary
     
     def _parse_llm_response(self, response: str) -> Dict[str, Any]:
-        """Parse LLM response, extracting JSON"""
+        """Parse LLM response, extracting JSON with intelligent fallback"""
         try:
             # Try to extract JSON from response
             if '```json' in response:
@@ -246,14 +268,46 @@ What do you see in this new data? Do you need anything else?
                 json_str = response.strip()
             
             parsed = json.loads(json_str)
+            
+            # Ensure we have a status field
+            if 'status' not in parsed:
+                # Try to infer status from content
+                if 'recommendation' in parsed or 'final' in response.lower():
+                    parsed['status'] = 'final'
+                elif 'data' in response.lower() or 'more' in response.lower():
+                    parsed['status'] = 'need_more_data'
+                else:
+                    parsed['status'] = 'continue'
+                    
             return parsed
         
         except Exception as e:
-            logger.warning(f"Failed to parse LLM response: {e}")
-            # Try to extract any useful information
+            logger.warning(f"   ⚠️  Failed to parse LLM response as JSON: {e}")
+            
+            # Intelligent text analysis fallback
+            response_lower = response.lower()
+            
+            # Look for completion indicators
+            if any(word in response_lower for word in ['final', 'complete', 'recommendation', 'conclude']):
+                return {
+                    'status': 'final',
+                    'raw_response': response,
+                    'note': 'Parsed from unstructured response'
+                }
+            
+            # Look for data request indicators  
+            elif any(word in response_lower for word in ['need', 'more', 'data', 'information', 'fetch']):
+                return {
+                    'status': 'need_more_data',
+                    'raw_response': response,
+                    'note': 'Parsed from unstructured response'
+                }
+            
+            # Default fallback
             return {
-                'status': 'error',
-                'raw_response': response
+                'status': 'continue',
+                'raw_response': response,
+                'note': 'Could not parse structured response'
             }
     
     def _fetch_requested_data(self, symbol: str, requests: List[str]) -> Dict[str, Any]:

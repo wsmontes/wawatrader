@@ -244,12 +244,34 @@ class SystemOrchestrator:
             watchlist = []
             
             try:
-                # Try to get dynamic watchlist from Alpaca
-                watchlist = alpaca.get_active_stocks(limit=50)
-                logger.info(f"📋 Dynamic watchlist loaded: {len(watchlist)} stocks")
+                # NEW STRATEGY: Get dynamic ranked universe based on performance metrics
+                logger.info("🎯 Building performance-ranked universe...")
+                universe_result = alpaca.get_universe_with_ranking(
+                    universe_size=300,  # Analyze 300 stocks
+                    top_n=50,          # Select top 50 for LLM analysis  
+                    min_price=5.0,     # Filter penny stocks
+                    max_price=1000.0   # Filter extreme high-priced stocks
+                )
+                
+                watchlist = universe_result['top_symbols']
+                universe_size = universe_result['universe_size']
+                
+                logger.success(f"✅ Ranked universe: {universe_size} analyzed → {len(watchlist)} selected")
+                
+                # Show top performers
+                top_5_data = universe_result['all_data'][:5]
+                logger.info("🔝 Top 5 by performance:")
+                for i, stock in enumerate(top_5_data):
+                    score = stock.get('composite_score', 0)
+                    day_ret = stock.get('day_1_return', 0)
+                    vol_ratio = stock.get('volume_ratio', 1)
+                    logger.info(f"   {i+1}. {stock['symbol']}: Score {score:.3f} "
+                              f"(1d: {day_ret:+.1f}%, Vol: {vol_ratio:.1f}x)")
+                              
             except Exception as e:
-                logger.warning(f"⚠️  Failed to get dynamic watchlist from Alpaca: {e}")
-                logger.info("🤖 LLM will build watchlist from market intelligence...")
+                logger.error(f"❌ Dynamic universe building failed: {e}")
+                logger.info("🔄 Falling back to simple stock selection...")
+                watchlist = alpaca.get_active_stocks(limit=50)
             
             # If no watchlist from Alpaca, LLM will discover symbols from:
             # 1. News analysis (MarketIntelligence.get_dynamic_universe)
@@ -286,32 +308,43 @@ class SystemOrchestrator:
             
             agent = TradingAgent(symbols=watchlist, dry_run=False)
             
-            logger.info(f"🎯 Trading agent initialized")
+            logger.info(f"🎯 Trading agent initialized with MASTER BATCH ANALYSIS")
             logger.info(f"   Watchlist: {', '.join(watchlist[:10])}{'...' if len(watchlist) > 10 else ''}")
+            logger.info("   🧠 Portfolio optimization: ALL opportunities analyzed simultaneously")
+            logger.info("   ⚖️  Comparative ranking: Best BUY vs best SELL decisions")
             
             # Initialize intelligent market hours manager
             hours_manager = MarketHoursManager(agent)
             logger.success("✅ Market hours manager initialized")
             logger.info("🌍 System will adapt behavior based on market phase:")
-            logger.info("   🟢 Market Open: Active trading (5 min cycles)")
-            logger.info("   📊 After Hours: Learning and analysis (30 min)")
-            logger.info("   🔍 Evening: Deep research (1 hour)")
+            logger.info("   🟢 Market Open: BATCH portfolio analysis (5 min cycles)")
+            logger.info("   📊 After Hours: Learning and batch analysis (30 min)")
+            logger.info("   🔍 Evening: Deep research batch (1 hour)")
             logger.info("   💤 Deep Night: Sleep mode (2 hours)")
-            logger.info("   🌅 Pre-Market: Preparation (15 min)")
+            logger.info("   🌅 Pre-Market: Batch preparation (15 min)")
             
             while not self.shutdown_requested:
                 try:
-                    # Run appropriate task for current market phase
-                    result = hours_manager.run_appropriate_task()
+                    # MASTER STRATEGY: Use batch analysis during active trading
+                    market_status = agent.alpaca.get_market_status()
                     
-                    # Log result
-                    if result['status'] == 'success':
-                        logger.success(f"✅ {result.get('task', 'Task')} complete")
+                    if market_status.get('is_open', False):
+                        logger.info("🎯 MARKET OPEN: Running MASTER batch analysis...")
+                        agent.run_cycle_batch()  # USE NEW BATCH METHOD
+                        sleep_seconds = 300  # 5 minutes during market hours
                     else:
-                        logger.warning(f"⚠️  {result.get('task', 'Task')} had issues")
+                        # Use regular hours manager for non-trading hours
+                        result = hours_manager.run_appropriate_task()
+                        
+                        # Log result
+                        if result['status'] == 'success':
+                            logger.success(f"✅ {result.get('task', 'Task')} complete")
+                        else:
+                            logger.warning(f"⚠️  {result.get('task', 'Task')} had issues")
+                        
+                        sleep_seconds = result.get('next_run_seconds', 300)
                     
                     # Sleep for appropriate interval
-                    sleep_seconds = result.get('next_run_seconds', 300)
                     next_run = datetime.now() + timedelta(seconds=sleep_seconds)
                     logger.info(f"⏰ Next check at {next_run.strftime('%I:%M %p')} ({sleep_seconds/60:.0f} min)")
                     time.sleep(sleep_seconds)
@@ -345,19 +378,29 @@ class SystemOrchestrator:
                 try:
                     logger.info("🧠 Running market analysis and planning...")
                     
-                    # Get dynamic watchlist (same as trading mode)
+                    # Get dynamic ranked universe for overnight analysis  
                     alpaca_client = get_client()
                     try:
-                        watchlist = alpaca_client.get_active_stocks(limit=50)
-                        logger.info(f"📋 Planning watchlist: {len(watchlist)} stocks")
+                        logger.info("🌙 Building overnight analysis universe...")
+                        universe_result = alpaca_client.get_universe_with_ranking(
+                            universe_size=200,  # Smaller universe for overnight analysis
+                            top_n=50,          # Top 50 for LLM deep analysis
+                            min_price=5.0,
+                            max_price=1000.0
+                        )
+                        
+                        watchlist = universe_result['top_symbols']
+                        logger.info(f"📋 Overnight analysis universe: {len(watchlist)} top performers selected")
+                        
                     except Exception as e:
+                        logger.warning(f"Dynamic universe failed: {e}")
+                        # Minimal fallback list - major liquid stocks only
                         watchlist = [
-                            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'BRK.B',
-                            'JPM', 'JNJ', 'V', 'PG', 'MA', 'HD', 'UNH', 'DIS', 'BAC', 'XOM',
-                            'CSCO', 'ADBE', 'NFLX', 'PFE', 'KO', 'PEP', 'TMO', 'ABBV', 'COST',
-                            'MRK', 'AVGO', 'WMT', 'CRM', 'ACN', 'TXN', 'MDT', 'LLY', 'NKE'
+                            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META',
+                            'JPM', 'BAC', 'UNH', 'HD', 'WMT', 'V', 'MA', 'PG',
+                            'SPY', 'QQQ', 'IWM', 'DIA', 'XLF'
                         ]
-                        logger.info(f"📋 Using fallback watchlist: {len(watchlist)} stocks")
+                        logger.info(f"📋 Using minimal fallback: {len(watchlist)} stocks")
                     
                     bridge = LLMBridge()
                     client = get_client()

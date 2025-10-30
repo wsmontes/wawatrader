@@ -78,7 +78,7 @@ class Dashboard:
     - Advanced analytics and monitoring
     """
     
-    def __init__(self, data_dir: str = "trading_data"):
+    def __init__(self, data_dir: str = "trading_data", trading_agent=None):
         """Initialize professional dashboard"""
         if not DASH_AVAILABLE:
             raise ImportError("Dash required: pip install dash dash-bootstrap-components plotly")
@@ -88,6 +88,7 @@ class Dashboard:
         
         # Initialize components
         self.alpaca = get_client()
+        self.trading_agent = trading_agent  # Optional trading agent connection
         
         # Create Dash app with custom styling
         self.app = Dash(
@@ -552,6 +553,82 @@ class Dashboard:
                     
                     .config-button:focus {
                         outline: 2px solid var(--accent-blue);
+                    }
+                    
+                    /* Replay Controls */
+                    .replay-control-btn {
+                        background: var(--bg-tertiary);
+                        border: 1px solid var(--border-color);
+                        border-radius: 4px;
+                        padding: 8px 12px;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        color: var(--text-primary);
+                        font-size: 16px;
+                    }
+                    
+                    .replay-control-btn:hover {
+                        background: var(--accent-purple);
+                        border-color: var(--accent-purple);
+                        transform: scale(1.05);
+                    }
+                    
+                    .replay-play {
+                        background: var(--accent-purple);
+                        border-color: var(--accent-purple);
+                    }
+                    
+                    .speed-btn {
+                        background: var(--bg-tertiary);
+                        border: 1px solid var(--border-color);
+                        border-radius: 4px;
+                        padding: 4px 10px;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        color: var(--text-secondary);
+                        font-size: 11px;
+                        font-family: JetBrains Mono;
+                    }
+                    
+                    .speed-btn:hover {
+                        background: var(--accent-purple);
+                        color: var(--text-primary);
+                        border-color: var(--accent-purple);
+                    }
+                    
+                    .speed-btn-active {
+                        background: var(--accent-purple);
+                        color: var(--text-primary);
+                        border-color: var(--accent-purple);
+                        font-weight: bold;
+                    }
+                    
+                    .replay-timeline-slider {
+                        margin: 0;
+                    }
+                    
+                    .replay-timeline-slider .rc-slider-rail {
+                        background: var(--bg-tertiary);
+                        height: 8px;
+                    }
+                    
+                    .replay-timeline-slider .rc-slider-track {
+                        background: var(--accent-purple);
+                        height: 8px;
+                    }
+                    
+                    .replay-timeline-slider .rc-slider-handle {
+                        background: var(--accent-purple);
+                        border: 2px solid var(--text-primary);
+                        width: 20px;
+                        height: 20px;
+                        margin-top: -6px;
+                    }
+                    
+                    .replay-timeline-slider .rc-slider-mark-text {
+                        color: var(--text-muted);
+                        font-size: 10px;
+                        font-family: JetBrains Mono;
                     }
                     
                     .config-modal {
@@ -1085,6 +1162,8 @@ class Dashboard:
                             style={"background": "var(--bg-tertiary)", "color": "#00aaff", "fontWeight": "500", "fontSize": "11px"}),
                     html.Div(id="market-status", className="status-badge",
                             style={"background": "var(--bg-tertiary)", "fontWeight": "600"}),
+                    html.Div(id="refresh-rate-badge", children="🔄 5s", className="status-badge",
+                            style={"background": "var(--bg-tertiary)", "color": "var(--accent-green)", "fontSize": "10px", "fontFamily": "JetBrains Mono"}),
                     html.Div(id="market-state", className="status-badge",
                             style={"background": "var(--bg-tertiary)", "color": "var(--text-secondary)", "fontSize": "11px"}),
                     html.Div(id="market-time", className="status-badge", 
@@ -1099,6 +1178,72 @@ class Dashboard:
                     className="config-button")
                 ], className="header-status")
             ], className="header-bar"),
+            
+            # Timeline Replay Controls (Collapsible)
+            html.Div([
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-history", style={"marginRight": "8px", "color": "var(--accent-purple)"}),
+                        html.H5("Timeline Replay", style={"margin": "0", "color": "var(--accent-purple)", "fontSize": "14px"}),
+                        html.Div(id="replay-status-badge", children="⏸️ REPLAY", 
+                                className="status-badge",
+                                style={"display": "none", "marginLeft": "12px", "background": "var(--accent-purple)", "animation": "pulse 2s ease-in-out infinite"}),
+                        html.Div(id="replay-time-display", children="", 
+                                style={"marginLeft": "12px", "fontFamily": "JetBrains Mono", "fontSize": "12px", "color": "var(--text-secondary)"}),
+                        html.Button("⏯️", id="toggle-replay-btn", n_clicks=0, 
+                                   title="Toggle Replay Panel",
+                                   style={"marginLeft": "auto", "background": "transparent", "border": "1px solid rgba(170, 68, 255, 0.3)", 
+                                          "color": "#aa44ff", "padding": "4px 12px", "borderRadius": "4px", "cursor": "pointer"})
+                    ], style={"display": "flex", "alignItems": "center", "padding": "12px 16px", "borderBottom": "1px solid var(--border-color)"}),
+                    
+                    html.Div([
+                        # Playback Controls
+                        html.Div([
+                            html.Div([
+                                html.Button("⏮️", id="replay-first-btn", n_clicks=0, className="replay-control-btn", title="First"),
+                                html.Button("⏪", id="replay-prev-btn", n_clicks=0, className="replay-control-btn", title="Previous"),
+                                html.Button("⏯️", id="replay-play-btn", n_clicks=0, className="replay-control-btn replay-play", title="Play/Pause"),
+                                html.Button("⏩", id="replay-next-btn", n_clicks=0, className="replay-control-btn", title="Next"),
+                                html.Button("⏭️", id="replay-last-btn", n_clicks=0, className="replay-control-btn", title="Last"),
+                                html.Button("⏹️", id="replay-stop-btn", n_clicks=0, className="replay-control-btn", title="Stop"),
+                            ], style={"display": "flex", "gap": "8px", "marginBottom": "12px"}),
+                            
+                            # Speed Controls
+                            html.Div([
+                                html.Span("Speed:", style={"marginRight": "8px", "fontSize": "12px"}),
+                                html.Button("1x", id="speed-1x", n_clicks=0, className="speed-btn speed-btn-active"),
+                                html.Button("5x", id="speed-5x", n_clicks=0, className="speed-btn"),
+                                html.Button("10x", id="speed-10x", n_clicks=0, className="speed-btn"),
+                                html.Button("30x", id="speed-30x", n_clicks=0, className="speed-btn"),
+                                html.Button("60x", id="speed-60x", n_clicks=0, className="speed-btn"),
+                            ], style={"display": "flex", "alignItems": "center", "gap": "6px", "marginBottom": "16px"}),
+                        ], style={"padding": "0 16px"}),
+                        
+                        # Timeline Slider
+                        html.Div([
+                            dcc.RangeSlider(
+                                id='replay-timeline-slider',
+                                min=0,
+                                max=100,
+                                value=[0],
+                                marks={},
+                                tooltip={"placement": "bottom", "always_visible": False},
+                                className="replay-timeline-slider"
+                            ),
+                            html.Div(id="replay-progress-text", 
+                                    style={"textAlign": "center", "fontSize": "11px", "color": "var(--text-muted)", "marginTop": "8px"})
+                        ], style={"padding": "0 16px 16px"}),
+                        
+                        # Event Markers Info
+                        html.Div(id="replay-event-info", 
+                                style={"padding": "12px 16px", "borderTop": "1px solid var(--border-color)", 
+                                       "fontSize": "12px", "color": "var(--text-secondary)", "maxHeight": "100px", "overflowY": "auto"})
+                    ], id="replay-panel", style={"display": "none"})  # Hidden by default
+                ], className="glass-card", style={"margin": "16px 24px 0"}),
+            ]),
+            
+            # Hidden state store for replay engine
+            dcc.Store(id='replay-state-store', data={'enabled': False, 'playing': False, 'speed': 1.0, 'current_index': 0}),
             
             # Main Grid Layout
             html.Div([
@@ -1359,6 +1504,62 @@ class Dashboard:
     
     def _register_professional_callbacks(self):
         """Register callbacks for professional dashboard"""
+        
+        # Adjust refresh rate based on market hours
+        @self.app.callback(
+            Output('main-interval', 'interval'),
+            [Input('main-interval', 'n_intervals')]
+        )
+        def adjust_refresh_rate(n):
+            """Adjust refresh rate based on market hours - save API calls when market is closed"""
+            try:
+                market_status = self.alpaca.get_market_status()
+                is_open = market_status.get('is_open', False)
+                
+                if is_open:
+                    # Market OPEN: Fast refresh for real-time trading (5 seconds)
+                    return 5000
+                else:
+                    # Market CLOSED: Slow refresh to save API calls (60 seconds)
+                    # Data doesn't change much after hours, no need to hammer the API
+                    return 60000
+            except Exception as e:
+                # Default to moderate refresh on error
+                return 30000
+        
+        @self.app.callback(
+            [Output('refresh-rate-badge', 'children'),
+             Output('refresh-rate-badge', 'style')],
+            [Input('main-interval', 'interval')]
+        )
+        def update_refresh_badge(interval):
+            """Update the refresh rate badge to show current polling frequency"""
+            seconds = interval / 1000
+            
+            if seconds <= 5:
+                # Fast refresh (market open)
+                return f"🔄 {seconds:.0f}s", {
+                    "background": "var(--bg-tertiary)",
+                    "color": "var(--accent-green)",
+                    "fontSize": "10px",
+                    "fontFamily": "JetBrains Mono"
+                }
+            elif seconds <= 30:
+                # Moderate refresh
+                return f"🔄 {seconds:.0f}s", {
+                    "background": "var(--bg-tertiary)",
+                    "color": "var(--accent-orange)",
+                    "fontSize": "10px",
+                    "fontFamily": "JetBrains Mono"
+                }
+            else:
+                # Slow refresh (market closed - saving API calls)
+                return f"💤 {seconds:.0f}s", {
+                    "background": "var(--bg-tertiary)",
+                    "color": "var(--text-muted)",
+                    "fontSize": "10px",
+                    "fontFamily": "JetBrains Mono"
+                }
         
         # Split into separate callbacks to avoid Dash multi-output bug
         @self.app.callback(
@@ -1744,6 +1945,8 @@ class Dashboard:
                             if 'response' in conv:
                                 response_data = json.loads(conv['response'].replace('```json\n', '').replace('\n```', ''))
                                 confidence = response_data.get('confidence', 0)
+                                # Ensure confidence is numeric for comparison
+                                confidence = float(confidence) if isinstance(confidence, (str, int, float)) else 0
                                 if confidence >= 75:
                                     filtered_conversations.append(conv)
                         except:
@@ -1780,6 +1983,8 @@ class Dashboard:
                             try:
                                 response_data = json.loads(conv['response'].replace('```json\n', '').replace('\n```', ''))
                                 conf = response_data.get('confidence', 0)
+                                # Ensure confidence is numeric for comparison
+                                conf = float(conf) if isinstance(conf, (str, int, float)) else 0
                                 if conf > 0:
                                     confidences.append(conf)
                                 
@@ -2187,6 +2392,8 @@ class Dashboard:
                             try:
                                 response_data = json.loads(conv['response'])
                                 confidence = response_data.get('confidence', 75)
+                                # Ensure confidence is numeric for comparison
+                                confidence = float(confidence) if isinstance(confidence, (str, int, float)) else 75
                             except:
                                 pass
                         
@@ -2275,6 +2482,8 @@ class Dashboard:
                                     # This is market intelligence
                                     sentiment = response_data.get('market_sentiment', 'neutral').upper()
                                     confidence = response_data.get('confidence', 75)
+                                    # Ensure confidence is numeric
+                                    confidence = float(confidence) if isinstance(confidence, (str, int, float)) else 75
                                     regime = response_data.get('regime_assessment', '').replace('_', ' ').title()
                                     recommendations = response_data.get('recommended_actions', [])
                                     decision = f"{sentiment} Market"
@@ -2282,6 +2491,8 @@ class Dashboard:
                                     # Regular stock trading decision
                                     decision = response_data.get('decision', 'hold').upper()
                                     confidence = response_data.get('confidence', 75)
+                                    # Ensure confidence is numeric
+                                    confidence = float(confidence) if isinstance(confidence, (str, int, float)) else 75
                             except:
                                 pass
                         
@@ -2580,23 +2791,26 @@ class Dashboard:
                             
                             # Calculate hold duration from order history
                             try:
-                                entry_time = self.trading_agent.alpaca.get_position_entry_time(symbol)
-                                if entry_time:
-                                    from datetime import datetime, timezone
-                                    now = datetime.now(timezone.utc)
-                                    duration = now - entry_time
-                                    
-                                    # Format duration nicely
-                                    days = duration.days
-                                    hours = duration.seconds // 3600
-                                    minutes = (duration.seconds % 3600) // 60
-                                    
-                                    if days > 0:
-                                        hold_duration = f"{days}d {hours}h"
-                                    elif hours > 0:
-                                        hold_duration = f"{hours}h {minutes}m"
+                                if self.trading_agent and hasattr(self.trading_agent, 'alpaca'):
+                                    entry_time = self.trading_agent.alpaca.get_position_entry_time(symbol)
+                                    if entry_time:
+                                        from datetime import datetime, timezone
+                                        now = datetime.now(timezone.utc)
+                                        duration = now - entry_time
+                                        
+                                        # Format duration nicely
+                                        days = duration.days
+                                        hours = duration.seconds // 3600
+                                        minutes = (duration.seconds % 3600) // 60
+                                        
+                                        if days > 0:
+                                            hold_duration = f"{days}d {hours}h"
+                                        elif hours > 0:
+                                            hold_duration = f"{hours}h {minutes}m"
+                                        else:
+                                            hold_duration = f"{minutes}m"
                                     else:
-                                        hold_duration = f"{minutes}m"
+                                        hold_duration = "N/A"
                                 else:
                                     hold_duration = "N/A"
                             except Exception as e:
@@ -2818,6 +3032,257 @@ class Dashboard:
             except Exception as e:
                 logger.error(f"❌ Failed to save configuration: {e}")
                 return {"display": "flex"}
+        
+        # ========== REPLAY MODE CALLBACKS ==========
+        
+        # Toggle replay panel visibility
+        @self.app.callback(
+            Output('replay-panel', 'style'),
+            [Input('toggle-replay-btn', 'n_clicks')],
+            [State('replay-panel', 'style')],
+            prevent_initial_call=True
+        )
+        def toggle_replay_panel(n_clicks, current_style):
+            """Show/hide replay panel"""
+            if not n_clicks:
+                raise PreventUpdate
+            
+            from wawatrader.replay_engine import get_replay_engine
+            
+            # Toggle visibility
+            if current_style.get('display') == 'none':
+                # Initialize replay engine when opening
+                engine = get_replay_engine()
+                if not engine.has_data:
+                    try:
+                        engine.load_logs()
+                        logger.info(f"✅ Replay engine loaded: {len(engine.timeline)} events")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to load replay engine: {e}")
+                        return current_style
+                
+                return {**current_style, "display": "block"}
+            else:
+                return {**current_style, "display": "none"}
+        
+        # Update timeline slider range when panel opens
+        @self.app.callback(
+            [Output('replay-timeline-slider', 'min'),
+             Output('replay-timeline-slider', 'max'),
+             Output('replay-timeline-slider', 'value'),
+             Output('replay-timeline-slider', 'marks')],
+            [Input('replay-panel', 'style')],
+            prevent_initial_call=True
+        )
+        def update_slider_range(panel_style):
+            """Update slider range based on loaded timeline"""
+            if panel_style.get('display') == 'none':
+                raise PreventUpdate
+            
+            from wawatrader.replay_engine import get_replay_engine
+            
+            engine = get_replay_engine()
+            if not engine.has_data:
+                raise PreventUpdate
+            
+            # Create marks for slider (every 20% of timeline)
+            total_events = len(engine.timeline)
+            marks = {}
+            for i in range(0, 6):  # 0%, 20%, 40%, 60%, 80%, 100%
+                idx = int(i * total_events / 5)
+                if idx < total_events:
+                    event = engine.timeline[idx]
+                    time_str = event.timestamp.strftime("%m/%d %H:%M")
+                    marks[idx] = {'label': time_str, 'style': {'fontSize': '10px', 'color': 'var(--text-muted)'}}
+            
+            return 0, total_events - 1, 0, marks
+        
+        # Playback controls callback
+        @self.app.callback(
+            [Output('replay-state-store', 'data'),
+             Output('replay-play-btn', 'children'),
+             Output('replay-time-display', 'children'),
+             Output('replay-progress-text', 'children'),
+             Output('replay-event-info', 'children')],
+            [Input('replay-first-btn', 'n_clicks'),
+             Input('replay-prev-btn', 'n_clicks'),
+             Input('replay-play-btn', 'n_clicks'),
+             Input('replay-next-btn', 'n_clicks'),
+             Input('replay-last-btn', 'n_clicks'),
+             Input('replay-stop-btn', 'n_clicks'),
+             Input('replay-timeline-slider', 'value'),
+             Input('main-interval', 'n_intervals')],
+            [State('replay-state-store', 'data')],
+            prevent_initial_call=True
+        )
+        def control_replay(first_clicks, prev_clicks, play_clicks, next_clicks, last_clicks, 
+                          stop_clicks, slider_value, n_intervals, replay_state):
+            """Handle all replay controls"""
+            from wawatrader.replay_engine import get_replay_engine, ReplayState
+            
+            engine = get_replay_engine()
+            if not engine.has_data:
+                raise PreventUpdate
+            
+            # Initialize state if needed
+            if replay_state is None:
+                replay_state = {'playing': False, 'current_index': 0, 'speed': 1.0}
+            
+            # Determine which button was clicked
+            triggered = ctx.triggered_id if ctx.triggered else None
+            
+            if triggered == 'replay-first-btn':
+                engine.seek_to_index(0)
+                replay_state['current_index'] = 0
+                replay_state['playing'] = False
+                
+            elif triggered == 'replay-prev-btn':
+                event = engine.previous_event()
+                if event:
+                    replay_state['current_index'] = max(0, replay_state['current_index'] - 1)
+                replay_state['playing'] = False
+                
+            elif triggered == 'replay-play-btn':
+                if replay_state['playing']:
+                    engine.pause()
+                    replay_state['playing'] = False
+                else:
+                    engine.play()
+                    replay_state['playing'] = True
+                    
+            elif triggered == 'replay-next-btn':
+                event = engine.next_event()
+                if event:
+                    replay_state['current_index'] = min(len(engine.timeline) - 1, 
+                                                       replay_state['current_index'] + 1)
+                replay_state['playing'] = False
+                
+            elif triggered == 'replay-last-btn':
+                engine.seek_to_index(len(engine.timeline) - 1)
+                replay_state['current_index'] = len(engine.timeline) - 1
+                replay_state['playing'] = False
+                
+            elif triggered == 'replay-stop-btn':
+                engine.stop()
+                replay_state['playing'] = False
+                replay_state['current_index'] = 0
+                
+            elif triggered == 'replay-timeline-slider':
+                engine.seek_to_index(slider_value)
+                replay_state['current_index'] = slider_value
+                replay_state['playing'] = False
+                
+            elif triggered == 'main-interval' and replay_state['playing']:
+                # Auto-advance during playback
+                event = engine.next_event()
+                if event:
+                    replay_state['current_index'] += 1
+                else:
+                    # Reached end
+                    replay_state['playing'] = False
+            
+            # Get current state
+            current_event = engine.get_current_event()
+            progress = engine.get_progress()
+            
+            # Format display
+            play_btn_icon = "⏸️" if replay_state['playing'] else "▶️"
+            
+            if current_event:
+                time_display = current_event.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                progress_text = f"Event {replay_state['current_index'] + 1} / {len(engine.timeline)} ({progress*100:.1f}%)"
+                
+                # Format event info
+                event_type = current_event.event_type.value
+                event_data = current_event.data
+                
+                if event_type == 'decision':
+                    symbol = event_data.get('symbol', 'UNKNOWN')
+                    action = event_data.get('action', 'N/A')
+                    confidence = event_data.get('confidence', 0)
+                    event_info = f"🤖 DECISION: {action} {symbol} (Confidence: {confidence}%)"
+                    
+                elif event_type == 'order_execution':
+                    symbol = event_data.get('symbol', 'UNKNOWN')
+                    side = event_data.get('side', 'N/A')
+                    qty = event_data.get('qty', 0)
+                    price = event_data.get('filled_avg_price', 0)
+                    event_info = f"💰 ORDER: {side} {qty} {symbol} @ ${price:.2f}"
+                    
+                elif event_type == 'market_data':
+                    symbol = event_data.get('symbol', 'UNKNOWN')
+                    close = event_data.get('close', 0)
+                    event_info = f"📊 MARKET: {symbol} @ ${close:.2f}"
+                    
+                elif event_type == 'account_snapshot':
+                    equity = event_data.get('equity', 0)
+                    buying_power = event_data.get('buying_power', 0)
+                    event_info = f"💵 ACCOUNT: Equity ${equity:.2f}, BP ${buying_power:.2f}"
+                    
+                elif event_type == 'position_snapshot':
+                    positions = event_data.get('positions', [])
+                    event_info = f"📈 POSITIONS: {len(positions)} open"
+                    
+                else:  # llm_conversation
+                    model = event_data.get('model', 'unknown')
+                    tokens = event_data.get('response_tokens', 0)
+                    event_info = f"🤖 LLM: {model} ({tokens} tokens)"
+                    
+            else:
+                time_display = "N/A"
+                progress_text = "No data"
+                event_info = "No event"
+            
+            return replay_state, play_btn_icon, time_display, progress_text, event_info
+        
+        # Speed control callback
+        @self.app.callback(
+            [Output('speed-1x', 'className'),
+             Output('speed-5x', 'className'),
+             Output('speed-10x', 'className'),
+             Output('speed-30x', 'className'),
+             Output('speed-60x', 'className')],
+            [Input('speed-1x', 'n_clicks'),
+             Input('speed-5x', 'n_clicks'),
+             Input('speed-10x', 'n_clicks'),
+             Input('speed-30x', 'n_clicks'),
+             Input('speed-60x', 'n_clicks')],
+            prevent_initial_call=True
+        )
+        def change_speed(s1, s5, s10, s30, s60):
+            """Change replay speed"""
+            from wawatrader.replay_engine import get_replay_engine
+            
+            triggered = ctx.triggered_id if ctx.triggered else None
+            
+            if not triggered:
+                raise PreventUpdate
+            
+            engine = get_replay_engine()
+            
+            # Map button to speed
+            speed_map = {
+                'speed-1x': 1.0,
+                'speed-5x': 5.0,
+                'speed-10x': 10.0,
+                'speed-30x': 30.0,
+                'speed-60x': 60.0
+            }
+            
+            speed = speed_map.get(triggered, 1.0)
+            engine.set_speed(speed)
+            
+            # Update button classes
+            base_class = "speed-btn"
+            active_class = "speed-btn speed-btn-active"
+            
+            return (
+                active_class if triggered == 'speed-1x' else base_class,
+                active_class if triggered == 'speed-5x' else base_class,
+                active_class if triggered == 'speed-10x' else base_class,
+                active_class if triggered == 'speed-30x' else base_class,
+                active_class if triggered == 'speed-60x' else base_class
+            )
 
     def _get_llm_config_content(self):
         """Get LLM configuration tab content"""

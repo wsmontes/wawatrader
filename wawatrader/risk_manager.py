@@ -14,8 +14,12 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, date
 from dataclasses import dataclass
 from loguru import logger
+import numpy as np
+import pandas as pd
 
 from config.settings import settings
+
+__all__ = ['RiskManager', 'get_risk_manager', 'RiskCheckResult']
 
 
 @dataclass
@@ -32,10 +36,28 @@ class RiskCheckResult:
 
 
 class RiskManager:
-    """
-    Enforce hard-coded risk rules.
+    """Enforce hard-coded risk rules with absolute authority.
     
-    CRITICAL: These rules are ABSOLUTE. No LLM recommendation can override them.
+    This is the safety backbone of WawaTrader. All trading decisions must pass
+    through risk validation before execution. No LLM recommendation can override
+    these mathematically-enforced safety rules.
+    
+    Safety Features:
+        - Position size limits (max 5% per position)
+        - Daily loss limits with circuit breakers  
+        - Portfolio-wide risk exposure monitoring
+        - Real-time account protection
+        - Automatic position sizing calculations
+        
+    Example:
+        >>> risk = get_risk_manager()
+        >>> result = risk.validate_trade('AAPL', 100, 150.00)
+        >>> if result.approved:
+        ...     execute_trade()
+        
+    Note:
+        CRITICAL: These rules are ABSOLUTE and mathematically enforced.
+        No AI system can override safety parameters.
     """
     
     def __init__(self):
@@ -468,6 +490,319 @@ class RiskManager:
                 'max_daily_loss': f"{self.max_daily_loss*100:.1f}%",
                 'max_portfolio_risk': f"{self.max_portfolio_risk*100:.1f}%"
             }
+        }
+
+
+    # ========================================================================
+    # ADVANCED OPTIMIZATIONS
+    # ========================================================================
+    
+    def calculate_kelly_position_size(
+        self,
+        symbol: str,
+        win_rate: float,
+        avg_win: float,
+        avg_loss: float,
+        account_value: float,
+        current_price: float,
+        max_kelly_fraction: float = 0.25
+    ) -> Dict[str, Any]:
+        """
+        Calculate optimal position size using Kelly Criterion.
+        
+        Kelly Formula: f* = (bp - q) / b
+        Where:
+        - f* = optimal fraction of capital to risk
+        - b = win/loss ratio (avg_win / avg_loss)
+        - p = probability of win (win_rate)
+        - q = probability of loss (1 - win_rate)
+        
+        Args:
+            symbol: Stock ticker
+            win_rate: Historical win rate (0.0 to 1.0)
+            avg_win: Average winning trade amount
+            avg_loss: Average losing trade amount (positive number)
+            account_value: Total account value
+            current_price: Current stock price
+            max_kelly_fraction: Fractional Kelly multiplier (default 0.25 = quarter Kelly)
+        
+        Returns:
+            Dictionary with Kelly recommendations
+        """
+        # Validate inputs
+        if win_rate <= 0 or win_rate >= 1:
+            logger.warning(f"Invalid win rate: {win_rate}")
+            return self._default_position_size(account_value, current_price)
+        
+        if avg_win <= 0 or avg_loss <= 0:
+            logger.warning(f"Invalid win/loss amounts: win=${avg_win}, loss=${avg_loss}")
+            return self._default_position_size(account_value, current_price)
+        
+        # Calculate win/loss ratio
+        win_loss_ratio = avg_win / avg_loss
+        
+        # Calculate Kelly percentage
+        # f* = (bp - q) / b
+        kelly_pct = (win_loss_ratio * win_rate - (1 - win_rate)) / win_loss_ratio
+        
+        # Apply fractional Kelly (typically 25-50% of full Kelly to reduce volatility)
+        fractional_kelly = kelly_pct * max_kelly_fraction
+        
+        # Enforce bounds: never exceed max position size or go negative
+        kelly_bounded = max(0, min(fractional_kelly, self.max_position_size))
+        
+        # Calculate position value and shares
+        kelly_position_value = account_value * kelly_bounded
+        kelly_shares = int(kelly_position_value / current_price)
+        
+        # Log recommendation
+        logger.info(f"📊 Kelly Criterion for {symbol}:")
+        logger.info(f"   Win Rate: {win_rate*100:.1f}% | W/L Ratio: {win_loss_ratio:.2f}")
+        logger.info(f"   Full Kelly: {kelly_pct*100:.1f}% | Fractional Kelly ({max_kelly_fraction}x): {fractional_kelly*100:.1f}%")
+        logger.info(f"   Recommended: {kelly_shares} shares = ${kelly_position_value:,.2f} ({kelly_bounded*100:.1f}%)")
+        
+        return {
+            'symbol': symbol,
+            'full_kelly_pct': kelly_pct,
+            'fractional_kelly_pct': fractional_kelly,
+            'bounded_kelly_pct': kelly_bounded,
+            'recommended_shares': kelly_shares,
+            'position_value': kelly_position_value,
+            'win_rate': win_rate,
+            'win_loss_ratio': win_loss_ratio,
+            'reasoning': f"Kelly Criterion recommends {kelly_bounded*100:.1f}% position ({kelly_shares} shares)"
+        }
+    
+    def _default_position_size(self, account_value: float, current_price: float) -> Dict[str, Any]:
+        """Return default position size when Kelly calculation fails."""
+        default_pct = 0.05  # 5% default
+        position_value = account_value * default_pct
+        shares = int(position_value / current_price)
+        
+        return {
+            'fractional_kelly_pct': default_pct,
+            'bounded_kelly_pct': default_pct,
+            'recommended_shares': shares,
+            'position_value': position_value,
+            'reasoning': 'Default 5% position (Kelly calculation unavailable)'
+        }
+    
+    def calculate_volatility_adjusted_size(
+        self,
+        symbol: str,
+        base_shares: int,
+        current_volatility: float,
+        target_volatility: float = 0.15,
+        price: float = None
+    ) -> Dict[str, Any]:
+        """
+        Adjust position size based on volatility to maintain consistent risk.
+        
+        Higher volatility → Smaller position
+        Lower volatility → Larger position
+        
+        Args:
+            symbol: Stock ticker
+            base_shares: Base position size (from Kelly or other method)
+            current_volatility: Current annualized volatility (e.g., 0.25 = 25%)
+            target_volatility: Target portfolio volatility (default 15%)
+            price: Current stock price (for logging)
+        
+        Returns:
+            Dictionary with volatility-adjusted recommendations
+        """
+        # Validate inputs
+        if current_volatility <= 0:
+            logger.warning(f"Invalid volatility: {current_volatility}")
+            return {
+                'adjusted_shares': base_shares,
+                'volatility_adjustment': 1.0,
+                'reasoning': 'Invalid volatility, no adjustment applied'
+            }
+        
+        # Calculate adjustment factor
+        # If current vol = target vol → factor = 1.0 (no change)
+        # If current vol > target vol → factor < 1.0 (reduce size)
+        # If current vol < target vol → factor > 1.0 (increase size)
+        vol_adjustment = target_volatility / current_volatility
+        
+        # Limit adjustment to prevent extreme positions
+        vol_adjustment = max(0.25, min(vol_adjustment, 2.0))  # 0.25x to 2x max
+        
+        # Apply adjustment
+        adjusted_shares = int(base_shares * vol_adjustment)
+        
+        # Log adjustment
+        logger.info(f"📊 Volatility Adjustment for {symbol}:")
+        logger.info(f"   Current Vol: {current_volatility*100:.1f}% | Target Vol: {target_volatility*100:.1f}%")
+        logger.info(f"   Adjustment: {vol_adjustment:.2f}x")
+        logger.info(f"   Base: {base_shares} shares → Adjusted: {adjusted_shares} shares")
+        if price:
+            logger.info(f"   Value: ${base_shares*price:,.2f} → ${adjusted_shares*price:,.2f}")
+        
+        return {
+            'symbol': symbol,
+            'base_shares': base_shares,
+            'adjusted_shares': adjusted_shares,
+            'volatility_adjustment': vol_adjustment,
+            'current_volatility': current_volatility,
+            'target_volatility': target_volatility,
+            'reasoning': f"Volatility-adjusted from {base_shares} to {adjusted_shares} shares ({vol_adjustment:.2f}x)"
+        }
+    
+    def calculate_portfolio_correlation(
+        self,
+        positions: List[Dict[str, Any]],
+        historical_returns: Dict[str, pd.Series]
+    ) -> Dict[str, Any]:
+        """
+        Calculate portfolio correlation and diversification score.
+        
+        Lower correlation = Better diversification
+        High correlation (>0.7) = Concentrated risk
+        
+        Args:
+            positions: List of current positions with symbols and values
+            historical_returns: Dict mapping symbol to returns series
+        
+        Returns:
+            Dictionary with correlation analysis
+        """
+        if len(positions) < 2:
+            return {
+                'avg_correlation': 0.0,
+                'diversification_score': 1.0,
+                'max_correlation': 0.0,
+                'highly_correlated_pairs': [],
+                'reasoning': 'Single position - no correlation analysis needed'
+            }
+        
+        # Extract symbols and weights
+        symbols = [p['symbol'] for p in positions if p['symbol'] in historical_returns]
+        
+        if len(symbols) < 2:
+            return {
+                'avg_correlation': 0.0,
+                'diversification_score': 1.0,
+                'reasoning': 'Insufficient historical data for correlation analysis'
+            }
+        
+        # Build returns matrix
+        returns_matrix = pd.DataFrame({
+            symbol: historical_returns[symbol]
+            for symbol in symbols
+        })
+        
+        # Calculate correlation matrix
+        corr_matrix = returns_matrix.corr()
+        
+        # Extract upper triangle (avoid double-counting pairs)
+        upper_triangle = np.triu(corr_matrix.values, k=1)
+        correlations = upper_triangle[upper_triangle != 0]
+        
+        # Calculate metrics
+        avg_correlation = np.mean(correlations) if len(correlations) > 0 else 0.0
+        max_correlation = np.max(correlations) if len(correlations) > 0 else 0.0
+        
+        # Diversification score: 1.0 = perfect diversification, 0.0 = perfectly correlated
+        diversification_score = 1.0 - abs(avg_correlation)
+        
+        # Find highly correlated pairs (>0.7)
+        highly_correlated = []
+        for i in range(len(symbols)):
+            for j in range(i+1, len(symbols)):
+                corr = corr_matrix.iloc[i, j]
+                if abs(corr) > 0.7:
+                    highly_correlated.append({
+                        'pair': f"{symbols[i]}/{symbols[j]}",
+                        'correlation': corr
+                    })
+        
+        logger.info(f"📊 Portfolio Correlation Analysis:")
+        logger.info(f"   Symbols: {len(symbols)}")
+        logger.info(f"   Avg Correlation: {avg_correlation:.3f}")
+        logger.info(f"   Max Correlation: {max_correlation:.3f}")
+        logger.info(f"   Diversification Score: {diversification_score:.3f}")
+        if highly_correlated:
+            logger.warning(f"   ⚠️ {len(highly_correlated)} highly correlated pairs found")
+            for pair in highly_correlated[:3]:  # Show first 3
+                logger.warning(f"      {pair['pair']}: {pair['correlation']:.3f}")
+        
+        return {
+            'symbols': symbols,
+            'avg_correlation': avg_correlation,
+            'max_correlation': max_correlation,
+            'diversification_score': diversification_score,
+            'highly_correlated_pairs': highly_correlated,
+            'correlation_matrix': corr_matrix.to_dict(),
+            'reasoning': f"Portfolio has {diversification_score:.1%} diversification (avg corr: {avg_correlation:.3f})"
+        }
+    
+    def calculate_sharpe_ratio(
+        self,
+        returns: pd.Series,
+        risk_free_rate: float = 0.05
+    ) -> Dict[str, Any]:
+        """
+        Calculate Sharpe ratio for performance measurement.
+        
+        Sharpe Ratio = (Return - Risk Free Rate) / Standard Deviation
+        
+        Interpretation:
+        - > 2.0: Excellent
+        - 1.0-2.0: Good
+        - 0.0-1.0: Suboptimal
+        - < 0.0: Losing money
+        
+        Args:
+            returns: Series of returns (daily, weekly, etc.)
+            risk_free_rate: Annual risk-free rate (default 5%)
+        
+        Returns:
+            Dictionary with Sharpe ratio and analysis
+        """
+        if len(returns) < 2:
+            return {
+                'sharpe_ratio': 0.0,
+                'reasoning': 'Insufficient data for Sharpe ratio calculation'
+            }
+        
+        # Calculate metrics
+        avg_return = returns.mean()
+        std_return = returns.std()
+        
+        # Annualize if daily returns (assuming 252 trading days)
+        periods_per_year = 252
+        annualized_return = avg_return * periods_per_year
+        annualized_std = std_return * np.sqrt(periods_per_year)
+        
+        # Calculate Sharpe ratio
+        sharpe_ratio = (annualized_return - risk_free_rate) / annualized_std if annualized_std > 0 else 0.0
+        
+        # Interpret
+        if sharpe_ratio > 2.0:
+            interpretation = "Excellent"
+        elif sharpe_ratio > 1.0:
+            interpretation = "Good"
+        elif sharpe_ratio > 0.0:
+            interpretation = "Suboptimal"
+        else:
+            interpretation = "Poor (losing money)"
+        
+        logger.info(f"📊 Sharpe Ratio Analysis:")
+        logger.info(f"   Avg Daily Return: {avg_return*100:.3f}%")
+        logger.info(f"   Annualized Return: {annualized_return*100:.1f}%")
+        logger.info(f"   Annualized Volatility: {annualized_std*100:.1f}%")
+        logger.info(f"   Sharpe Ratio: {sharpe_ratio:.2f} ({interpretation})")
+        
+        return {
+            'sharpe_ratio': sharpe_ratio,
+            'avg_daily_return': avg_return,
+            'daily_std': std_return,
+            'annualized_return': annualized_return,
+            'annualized_volatility': annualized_std,
+            'interpretation': interpretation,
+            'reasoning': f"Sharpe ratio {sharpe_ratio:.2f} ({interpretation}) - Risk-adjusted return measure"
         }
 
 

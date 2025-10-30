@@ -22,6 +22,8 @@ import numpy as np
 from typing import Dict, Optional, Tuple
 from loguru import logger
 
+__all__ = ['TechnicalIndicators', 'analyze_dataframe', 'get_latest_signals']
+
 
 class TechnicalIndicators:
     """
@@ -442,14 +444,22 @@ class TechnicalIndicators:
 # =====================================================
 
 def analyze_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convenience function to calculate all indicators
+    """Calculate all technical indicators for market data.
+    
+    Computes comprehensive technical analysis including trend indicators,
+    momentum oscillators, volume analysis, and volatility measures. Used
+    throughout WawaTrader for market signal generation.
     
     Args:
-        df: DataFrame with OHLCV data
+        df: DataFrame with OHLCV data (open, high, low, close, volume)
         
     Returns:
-        DataFrame with all indicators
+        Enhanced DataFrame with all technical indicators added as columns
+        
+    Example:
+        >>> bars = client.get_bars('AAPL')  
+        >>> signals = analyze_dataframe(bars)
+        >>> print(f"RSI: {signals['rsi'].iloc[-1]:.1f}")
     """
     return TechnicalIndicators.calculate_all(df)
 

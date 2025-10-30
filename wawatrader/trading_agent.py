@@ -25,6 +25,8 @@ from wawatrader.alpaca_client import get_client
 from wawatrader.indicators import analyze_dataframe, get_latest_signals
 from wawatrader.llm_v2 import ModularLLMAnalyzer  # NEW: Modular prompt system with simplified format
 from wawatrader.risk_manager import get_risk_manager
+from wawatrader.strategy_calculator import get_strategy_calculator  # NEW: Pure math strategy baselines
+from wawatrader.startup_tasks import run_startup_tasks  # NEW: Automatic backfilling and initialization
 from wawatrader.market_intelligence import get_intelligence_engine
 from wawatrader.learning_engine import LearningEngine
 from wawatrader.position_manager import PositionManager
@@ -74,6 +76,7 @@ class TradingDecision:
     # Context
     indicators: Optional[Dict[str, Any]] = None
     llm_analysis: Optional[Dict[str, Any]] = None
+    calculated_strategies: Optional[Dict[str, Any]] = None  # NEW: Pure math strategy baselines
     account_value: Optional[float] = None
     current_pnl: Optional[float] = None
 
@@ -106,6 +109,7 @@ class TradingAgent:
         self.alpaca = get_client()
         self.llm_bridge = ModularLLMAnalyzer()  # NEW: Using modular LLM with simplified prompts
         self.risk_manager = get_risk_manager()
+        self.strategy_calculator = get_strategy_calculator(risk_manager=self.risk_manager)  # NEW: Pure math baselines
         self.intelligence_engine = get_intelligence_engine()
         self.learning_engine = LearningEngine(self.alpaca)
         
@@ -171,9 +175,20 @@ class TradingAgent:
         logger.info(f"  Symbols: {', '.join(symbols)}")
         logger.info(f"  Dry run: {dry_run}")
         logger.info(f"  Min confidence: {self.min_confidence}%")
+        
+        # Run startup tasks (backfill strategies, load historical data)
+        try:
+            startup_results = run_startup_tasks(
+                strategy_calculator=self.strategy_calculator,
+                risk_manager=self.risk_manager
+            )
+            self.startup_results = startup_results
+        except Exception as e:
+            logger.error(f"⚠️  Startup tasks failed (continuing anyway): {e}")
+            self.startup_results = {'error': str(e)}
     
-    def setup_logging(self):
-        """Setup decision logging to file"""
+    def setup_logging(self) -> None:
+        """Setup decision logging to file for audit trail and analysis."""
         log_dir = settings.project_root / "logs"
         log_dir.mkdir(exist_ok=True)
         
@@ -186,8 +201,8 @@ class TradingAgent:
             filter=lambda record: "DECISION" in record["extra"]
         )
     
-    def reset_daily_metrics(self):
-        """Reset daily tracking metrics at start of new trading day"""
+    def reset_daily_metrics(self) -> None:
+        """Reset daily tracking metrics at start of new trading day."""
         today = datetime.now().date()
         
         if self.last_reset_date != today:
@@ -328,8 +343,8 @@ class TradingAgent:
         return True, "All daily limits OK"
 
     
-    def update_account_state(self):
-        """Update account value, positions, and P&L"""
+    def update_account_state(self) -> None:
+        """Update account value, positions, and P&L for risk monitoring."""
         try:
             account = self.alpaca.get_account()
             self.account_value = float(account['equity'])
@@ -656,6 +671,26 @@ class TradingAgent:
         signals = analysis['signals']
         current_position = analysis['current_position']
         
+        # NEW: Calculate what pure math strategies would recommend (CONTROL GROUP)
+        historical_performance = self._get_historical_performance(symbol)
+        calculated_strategies = self.strategy_calculator.calculate_all_strategies(
+            symbol=symbol,
+            signals=signals,
+            current_position=current_position,
+            account_value=self.account_value,
+            historical_performance=historical_performance
+        )
+        
+        # Also get consensus recommendation
+        consensus = self.strategy_calculator.get_consensus_recommendation(calculated_strategies)
+        calculated_strategies['consensus'] = consensus
+        
+        logger.info(f"📊 {symbol} Calculated Strategies:")
+        for strat_name, strat_data in calculated_strategies.items():
+            action_emoji = "🟢" if strat_data['action'] == 'buy' else "🔴" if strat_data['action'] == 'sell' else "⚪"
+            logger.info(f"  {action_emoji} {strat_name}: {strat_data['action'].upper()} "
+                       f"({strat_data['confidence']}%) - {strat_data['reasoning'][:60]}...")
+        
         # Extract LLM recommendation
         action = llm.get('action', 'hold')
         confidence = llm.get('confidence', 0)
@@ -690,6 +725,7 @@ class TradingAgent:
             executed=False,
             indicators=signals,
             llm_analysis=llm,
+            calculated_strategies=calculated_strategies,  # NEW: Pure math baselines for comparison
             account_value=self.account_value,
             current_pnl=self.current_pnl
         )
@@ -802,6 +838,39 @@ class TradingAgent:
             logger.warning(f"⚠️ Failed to record decision in learning engine: {e}")
         
         return decision
+    
+    
+    def _get_historical_performance(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get historical performance metrics for a symbol.
+        
+        Used by strategy calculator for Kelly Criterion and other math-based strategies.
+        
+        Args:
+            symbol: Stock ticker
+        
+        Returns:
+            Dict with win_rate, avg_win, avg_loss
+        """
+        # Try to get from learning engine if available
+        if hasattr(self, 'learning_engine') and self.learning_engine:
+            try:
+                stats = self.learning_engine.get_symbol_stats(symbol)
+                if stats:
+                    return {
+                        'win_rate': stats.get('win_rate', 0.55),
+                        'avg_win': stats.get('avg_win', 500),
+                        'avg_loss': stats.get('avg_loss', 300)
+                    }
+            except Exception as e:
+                logger.debug(f"Could not get learning engine stats for {symbol}: {e}")
+        
+        # Fallback: Use conservative defaults
+        return {
+            'win_rate': 0.55,  # 55% win rate
+            'avg_win': 500,    # $500 average win
+            'avg_loss': 300    # $300 average loss
+        }
     
     def _calculate_position_size(
         self, 
@@ -1379,6 +1448,120 @@ class TradingAgent:
         # Log to structured file
         logger.bind(DECISION=True).info(json.dumps(decision_dict))
     
+    def run_cycle_batch(self):
+        """
+        MASTER STRATEGY: Run portfolio-optimized batch analysis cycle.
+        
+        Unlike sequential analysis, this evaluates ALL opportunities simultaneously
+        and makes coordinated portfolio decisions (what pros do).
+        
+        1. Update account state
+        2. Get ALL symbols data in parallel
+        3. Batch LLM analysis (comparative ranking)
+        4. Execute portfolio-optimized decisions
+        5. Log comprehensive analysis
+        """
+        logger.info("="*60)
+        logger.info(f"🎯 MASTER BATCH CYCLE: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("="*60)
+        
+        # Update account state
+        self.update_account_state()
+        
+        # Emergency checks
+        liquidation_check = self.risk_manager.check_emergency_liquidation(
+            current_pnl=self.current_pnl,
+            account_value=self.account_value
+        )
+        
+        if liquidation_check['liquidate']:
+            logger.error("🚨 EMERGENCY LIQUIDATION - BATCH ANALYSIS ABORTED")
+            self._emergency_liquidate_all()
+            return
+        
+        # Market status check
+        try:
+            market_status = self.alpaca.get_market_status()
+            if not market_status.get('is_open', False):
+                logger.info("💤 Market closed - batch analysis skipped")
+                return
+        except Exception as e:
+            logger.error(f"Market status check failed: {e}")
+            return
+        
+        # STEP 1: Collect ALL opportunity data in parallel
+        logger.info(f"📊 Collecting data for {len(self.symbols)} symbols...")
+        
+        opportunities = []
+        current_positions = []
+        
+        for symbol in self.symbols:
+            try:
+                # Get market data and indicators
+                bars = self.get_market_data(symbol)
+                if bars is None:
+                    continue
+                
+                df_with_indicators = analyze_dataframe(bars)
+                signals = get_latest_signals(df_with_indicators)
+                if not signals:
+                    continue
+                
+                # Check if this is a current position or opportunity
+                if symbol in self.positions:
+                    pos = self.positions[symbol]
+                    current_positions.append({
+                        'symbol': symbol,
+                        'signals': signals,
+                        'entry_price': float(pos['avg_entry_price']),
+                        'current_price': signals['price']['close'],
+                        'size': float(pos['qty']),
+                        'pnl_pct': ((signals['price']['close'] - float(pos['avg_entry_price'])) / float(pos['avg_entry_price']) * 100)
+                    })
+                else:
+                    # This is a potential new opportunity
+                    opportunities.append({
+                        'symbol': symbol,
+                        'signals': signals,
+                        'composite_score': self._calculate_composite_score(signals),
+                        'tier': self._determine_tier(symbol, signals)
+                    })
+                
+            except Exception as e:
+                logger.error(f"Data collection failed for {symbol}: {e}")
+                continue
+        
+        logger.info(f"📈 Found {len(opportunities)} opportunities, {len(current_positions)} positions")
+        
+        if not opportunities and not current_positions:
+            logger.warning("No data available for batch analysis")
+            return
+        
+        # STEP 2: Batch LLM Analysis (THE MASTER MOVE)
+        try:
+            logger.info("🧠 Running BATCH portfolio analysis...")
+            
+            portfolio_analysis = self.llm_bridge.analyze_portfolio_batch(
+                opportunities=opportunities,
+                current_positions=current_positions
+            )
+            
+            # STEP 3: Execute coordinated decisions based on portfolio analysis
+            self._execute_portfolio_decisions(portfolio_analysis, opportunities, current_positions)
+            
+            # STEP 4: Log comprehensive batch analysis
+            self._log_batch_analysis(portfolio_analysis, opportunities, current_positions)
+            
+        except Exception as e:
+            logger.error(f"Batch analysis failed: {e}")
+            logger.info("Falling back to sequential analysis...")
+            self.run_cycle()  # Fallback to old method
+            return
+        
+        logger.info("="*60)
+        logger.info(f"🎯 BATCH CYCLE COMPLETE: {len(opportunities)+len(current_positions)} symbols analyzed")
+        logger.info("="*60)
+
     def run_cycle(self):
         """
         Run one complete trading cycle for all symbols.
@@ -1461,6 +1644,181 @@ class TradingAgent:
         logger.info("="*60)
         logger.info(f"Cycle complete - Processed {len(self.symbols)} symbols")
         logger.info("="*60)
+    
+    def _calculate_composite_score(self, signals: Dict[str, Any]) -> float:
+        """Calculate a composite score for ranking opportunities."""
+        
+        score = 0.0
+        
+        # Price momentum (30% weight)
+        price = signals.get('price', {})
+        if price:
+            daily_return = price.get('daily_return', 0)
+            score += daily_return * 0.3
+        
+        # RSI momentum (25% weight) 
+        momentum = signals.get('momentum', {})
+        if momentum:
+            rsi = momentum.get('rsi', 50)
+            # Normalize RSI: 0-30 → negative, 30-70 → neutral, 70-100 → positive
+            rsi_score = (rsi - 50) / 50  # -1 to +1
+            score += rsi_score * 0.25
+        
+        # Volume activity (20% weight)
+        volume = signals.get('volume', {})
+        if volume:
+            vol_ratio = volume.get('volume_ratio', 1)
+            # Logarithmic scaling for volume spikes
+            import math
+            vol_score = math.log10(max(vol_ratio, 0.1)) / 2  # Scale log10(10) = 0.5
+            score += vol_score * 0.2
+        
+        # Trend alignment (25% weight)
+        trend = signals.get('trend', {})
+        price_data = signals.get('price', {})
+        if trend and price_data:
+            close = price_data.get('close', 0)
+            sma_20 = trend.get('sma_20', close)
+            sma_50 = trend.get('sma_50', close)
+            
+            trend_score = 0
+            if close > sma_20 > sma_50:
+                trend_score = 1  # Strong uptrend
+            elif close > sma_20:
+                trend_score = 0.5  # Moderate uptrend
+            elif close < sma_20 < sma_50:
+                trend_score = -1  # Strong downtrend
+            else:
+                trend_score = -0.5  # Moderate downtrend
+            
+            score += trend_score * 0.25
+        
+        return max(-1.0, min(1.0, score))  # Clamp between -1 and 1
+    
+    def _determine_tier(self, symbol: str, signals: Dict[str, Any]) -> str:
+        """Determine which tier this symbol belongs to."""
+        
+        price = signals.get('price', {}).get('close', 0)
+        
+        # Simple tier classification
+        if price > 100:
+            return 'Tier1_HighInfo'
+        elif len(symbol) <= 4 and price > 20:
+            return 'Tier2_Momentum'
+        elif price > 5:
+            return 'Tier3_Emerging'
+        else:
+            return 'Tier5_Speculative'
+    
+    def _execute_portfolio_decisions(
+        self, 
+        portfolio_analysis: Dict[str, Any], 
+        opportunities: List[Dict[str, Any]], 
+        current_positions: List[Dict[str, Any]]
+    ):
+        """Execute the coordinated portfolio decisions from batch analysis."""
+        
+        try:
+            analysis = portfolio_analysis.get('portfolio_analysis', {})
+            
+            # Execute BUY recommendations
+            best_opportunities = analysis.get('best_opportunities', [])
+            logger.info(f"🚀 Executing {len(best_opportunities)} BUY recommendations...")
+            
+            for opp in best_opportunities:
+                symbol = opp.get('symbol')
+                confidence = opp.get('confidence', 0)
+                target_allocation = opp.get('target_allocation', 3)  # Default 3%
+                
+                if confidence >= 70:  # Minimum confidence threshold
+                    # Create decision structure for execution
+                    decision = {
+                        'symbol': symbol,
+                        'action': 'BUY',
+                        'confidence': confidence,
+                        'reasoning': opp.get('reasoning', 'Portfolio batch recommendation'),
+                        'position_size_pct': target_allocation,
+                        'source': 'portfolio_batch'
+                    }
+                    
+                    self.execute_decision(decision)
+                    logger.info(f"✅ Executed BUY {symbol} (confidence: {confidence}%, allocation: {target_allocation}%)")
+            
+            # Execute SELL recommendations  
+            positions_to_exit = analysis.get('positions_to_exit', [])
+            logger.info(f"📉 Executing {len(positions_to_exit)} SELL recommendations...")
+            
+            for exit_rec in positions_to_exit:
+                symbol = exit_rec.get('symbol')
+                confidence = exit_rec.get('confidence', 0)
+                
+                if confidence >= 60 and symbol in self.positions:  # Lower threshold for sells
+                    decision = {
+                        'symbol': symbol,
+                        'action': 'SELL',
+                        'confidence': confidence,
+                        'reasoning': exit_rec.get('reasoning', 'Portfolio rotation recommendation'),
+                        'position_size_pct': 100,  # Full position exit
+                        'source': 'portfolio_batch'
+                    }
+                    
+                    self.execute_decision(decision)
+                    logger.info(f"✅ Executed SELL {symbol} (confidence: {confidence}%)")
+            
+        except Exception as e:
+            logger.error(f"Portfolio decision execution failed: {e}")
+    
+    def _log_batch_analysis(
+        self, 
+        portfolio_analysis: Dict[str, Any], 
+        opportunities: List[Dict[str, Any]], 
+        current_positions: List[Dict[str, Any]]
+    ):
+        """Log the comprehensive batch analysis results."""
+        
+        try:
+            log_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'type': 'portfolio_batch_cycle',
+                'market_data': {
+                    'opportunities_analyzed': len(opportunities),
+                    'positions_analyzed': len(current_positions),
+                    'account_value': self.account_value,
+                    'buying_power': self.buying_power,
+                    'current_pnl': self.current_pnl
+                },
+                'portfolio_analysis': portfolio_analysis,
+                'top_opportunities': [
+                    {
+                        'symbol': opp['symbol'], 
+                        'score': opp['composite_score'], 
+                        'tier': opp['tier']
+                    } for opp in sorted(opportunities, key=lambda x: x['composite_score'], reverse=True)[:5]
+                ],
+                'position_performance': [
+                    {
+                        'symbol': pos['symbol'],
+                        'pnl_pct': pos['pnl_pct'],
+                        'current_price': pos['current_price']
+                    } for pos in current_positions
+                ]
+            }
+            
+            # Log to decisions file
+            decisions_log = settings.project_root / "logs" / "decisions.jsonl"
+            with open(decisions_log, 'a') as f:
+                f.write(json.dumps(log_entry) + '\n')
+                
+            # Summary log  
+            analysis = portfolio_analysis.get('portfolio_analysis', {})
+            logger.info("📊 BATCH ANALYSIS SUMMARY:")
+            logger.info(f"   Market Overview: {analysis.get('market_overview', 'N/A')[:100]}...")
+            logger.info(f"   Best Opportunities: {len(analysis.get('best_opportunities', []))}")
+            logger.info(f"   Positions to Exit: {len(analysis.get('positions_to_exit', []))}")
+            logger.info(f"   Risk Assessment: {analysis.get('risk_assessment', 'N/A')[:100]}...")
+            
+        except Exception as e:
+            logger.error(f"Batch analysis logging failed: {e}")
     
     async def run_background_intelligence(self):
         """

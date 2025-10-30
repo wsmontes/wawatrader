@@ -11,16 +11,30 @@ hard numerical thresholds and risk rules.
 import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-from loguru import logger
-from openai import OpenAI  # LM Studio uses OpenAI-compatible API
+
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
+
+try:
+    from openai import OpenAI  # LM Studio uses OpenAI-compatible API
+except ImportError:
+    logger.warning("OpenAI not available - LLM features disabled")
+    OpenAI = None
 
 from config.settings import settings
 
 # New modular system (lazy import to avoid circular dependency)
 _modular_analyzer = None
 
-def get_modular_analyzer():
-    """Get or create modular analyzer instance."""
+def get_modular_analyzer() -> 'ModularLLMAnalyzer':
+    """Get or create modular analyzer instance.
+    
+    Returns:
+        Singleton ModularLLMAnalyzer instance for consistent LLM operations
+    """
     global _modular_analyzer
     if _modular_analyzer is None:
         from wawatrader.llm_v2 import ModularLLMAnalyzer
@@ -37,6 +51,11 @@ class LLMBridge:
     2. Text Description + Market Context → LLM Prompt
     3. LLM Response → Structured JSON
     4. JSON → Validation → Trading Signal
+    
+    MASTER STRATEGY: Batch Portfolio Analysis
+    - Analyze ALL opportunities simultaneously for comparative ranking
+    - Identify best BUY candidates vs best SELL candidates  
+    - Portfolio-level optimization, not individual stock decisions
     
     The LLM provides sentiment/interpretation, NOT numerical decisions.
     """
@@ -1463,6 +1482,389 @@ if __name__ == "__main__":
         print(f"   Sentiment: {fallback['sentiment']}")
         print(f"   Action: {fallback['action']}")
         print(f"   Reasoning: {fallback['reasoning']}")
+    
+    # =========================================================================
+    # MASTER STRATEGY: BATCH PORTFOLIO ANALYSIS  
+    # =========================================================================
+    
+    def analyze_portfolio_batch(
+        self, 
+        opportunities: List[Dict[str, Any]], 
+        current_positions: List[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        MASTER-LEVEL: Analyze entire opportunity set + current positions simultaneously.
+        
+        This is how professional traders think:
+        1. See ALL opportunities at once (no sequential bias)
+        2. Compare relative attractiveness  
+        3. Identify best BUY candidates
+        4. Identify best SELL candidates (from current positions)
+        5. Optimize overall portfolio allocation
+        
+        Args:
+            opportunities: List of potential new positions with their signals
+            current_positions: List of current positions with their signals
+            
+        Returns:
+            {
+                'portfolio_analysis': {
+                    'market_overview': str,
+                    'best_opportunities': [top 3-5 BUY candidates],
+                    'positions_to_exit': [SELL recommendations from current],
+                    'risk_assessment': str,
+                    'allocation_strategy': str
+                },
+                'individual_scores': {symbol: {sentiment, confidence, reasoning}...}
+            }
+        """
+        if not opportunities:
+            return self._get_empty_portfolio_analysis()
+        
+        current_positions = current_positions or []
+        
+        logger.info(f"🧠 Running batch portfolio analysis: {len(opportunities)} opportunities, {len(current_positions)} positions")
+        
+        try:
+            # Build comprehensive market context
+            portfolio_context = self._build_portfolio_context(opportunities, current_positions)
+            
+            # Create master portfolio prompt
+            portfolio_prompt = self._create_portfolio_prompt(portfolio_context)
+            
+            # Get LLM portfolio analysis
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": self._get_portfolio_system_prompt()
+                    },
+                    {
+                        "role": "user", 
+                        "content": portfolio_prompt
+                    }
+                ],
+                temperature=self.temperature,
+                max_tokens=4000  # Larger for portfolio analysis
+            )
+            
+            analysis_text = response.choices[0].message.content.strip()
+            
+            # Parse and validate portfolio analysis
+            portfolio_analysis = self._parse_portfolio_analysis(analysis_text)
+            
+            # Log the comprehensive analysis
+            self._log_portfolio_conversation(
+                portfolio_context, 
+                portfolio_prompt, 
+                analysis_text, 
+                portfolio_analysis
+            )
+            
+            return portfolio_analysis
+            
+        except Exception as e:
+            logger.error(f"❌ Portfolio analysis failed: {e}")
+            return self._get_fallback_portfolio_analysis(opportunities, current_positions)
+    
+    def _build_portfolio_context(
+        self, 
+        opportunities: List[Dict[str, Any]], 
+        current_positions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Build comprehensive context for portfolio-level decisions."""
+        
+        context = {
+            'timestamp': datetime.now().isoformat(),
+            'market_universe_size': len(opportunities),
+            'current_positions_count': len(current_positions),
+            'opportunities': [],
+            'positions': []
+        }
+        
+        # Process opportunities (potential BUY candidates)
+        for opp in opportunities:
+            symbol = opp.get('symbol', 'Unknown')
+            signals = opp.get('signals', {})
+            
+            # Convert to text summary for LLM
+            signal_summary = self.indicators_to_text(signals)
+            
+            context['opportunities'].append({
+                'symbol': symbol,
+                'price': signals.get('price', {}).get('close', 0),
+                'composite_score': opp.get('composite_score', 0),
+                'tier': opp.get('tier', 'Unknown'),
+                'signal_summary': signal_summary,
+                'key_metrics': self._extract_key_metrics(signals)
+            })
+        
+        # Process current positions (potential SELL candidates)
+        for pos in current_positions:
+            symbol = pos.get('symbol', 'Unknown')
+            signals = pos.get('signals', {})
+            
+            signal_summary = self.indicators_to_text(signals)
+            
+            context['positions'].append({
+                'symbol': symbol,
+                'current_price': signals.get('price', {}).get('close', 0),
+                'entry_price': pos.get('entry_price', 0),
+                'pnl_pct': pos.get('pnl_pct', 0),
+                'position_size': pos.get('size', 0),
+                'signal_summary': signal_summary,
+                'key_metrics': self._extract_key_metrics(signals)
+            })
+        
+        return context
+    
+    def _create_portfolio_prompt(self, context: Dict[str, Any]) -> str:
+        """Create the master portfolio analysis prompt."""
+        
+        prompt_parts = [
+            "🎯 PORTFOLIO OPTIMIZATION REQUEST",
+            "=" * 50,
+            f"Market Analysis Time: {context['timestamp']}",
+            f"Available Opportunities: {context['market_universe_size']} stocks",
+            f"Current Positions: {context['current_positions_count']} stocks",
+            ""
+        ]
+        
+        # Add opportunities section
+        if context['opportunities']:
+            prompt_parts.extend([
+                "📈 NEW OPPORTUNITIES (Potential BUY candidates):",
+                ""
+            ])
+            
+            for i, opp in enumerate(context['opportunities'][:10], 1):  # Top 10 only
+                prompt_parts.extend([
+                    f"{i}. {opp['symbol']} - ${opp['price']:.2f} (Score: {opp['composite_score']:.3f}, Tier: {opp['tier']})",
+                    f"   {opp['signal_summary'][:200]}...",
+                    ""
+                ])
+        
+        # Add current positions section
+        if context['positions']:
+            prompt_parts.extend([
+                "💼 CURRENT POSITIONS (Potential SELL candidates):",
+                ""
+            ])
+            
+            for i, pos in enumerate(context['positions'], 1):
+                pnl_indicator = "📈" if pos['pnl_pct'] > 0 else "📉" if pos['pnl_pct'] < 0 else "📊"
+                prompt_parts.extend([
+                    f"{i}. {pos['symbol']} - ${pos['current_price']:.2f} {pnl_indicator} {pos['pnl_pct']:+.1f}%",
+                    f"   Entry: ${pos['entry_price']:.2f}, Size: {pos['position_size']}",
+                    f"   {pos['signal_summary'][:200]}...",
+                    ""
+                ])
+        
+        prompt_parts.extend([
+            "🎯 ANALYSIS REQUEST:",
+            "Provide portfolio-level recommendations:",
+            "1. Market Overview & Sentiment",
+            "2. Top 3-5 BUY opportunities (best risk/reward)",
+            "3. SELL recommendations from current positions",
+            "4. Overall risk assessment",
+            "5. Allocation strategy",
+            "",
+            "Focus on COMPARATIVE analysis - rank opportunities relative to each other.",
+            "Consider portfolio balance, risk diversification, and capital rotation."
+        ])
+        
+        return "\n".join(prompt_parts)
+    
+    def _get_portfolio_system_prompt(self) -> str:
+        """Get system prompt optimized for portfolio-level analysis."""
+        
+        base_profile = self.profile_config['system_prompt']
+        
+        portfolio_addition = """
+
+🏆 PORTFOLIO MASTER MODE:
+You are analyzing an ENTIRE portfolio of opportunities simultaneously.
+Your job is to think like a professional portfolio manager.
+
+KEY PRINCIPLES:
+1. COMPARATIVE RANKING: Don't analyze stocks in isolation - rank them against each other
+2. OPPORTUNITY COST: Recommend the BEST opportunities, not just "good" ones
+3. RISK DIVERSIFICATION: Consider sector concentration, correlation, position sizing
+4. CAPITAL ROTATION: Be willing to recommend SELL on current positions to fund better opportunities
+5. PORTFOLIO BALANCE: Consider overall risk exposure and allocation strategy
+
+RESPONSE FORMAT (JSON):
+{
+  "portfolio_analysis": {
+    "market_overview": "2-3 sentence market assessment",
+    "best_opportunities": [
+      {"symbol": "XYZ", "confidence": 85, "reasoning": "why this is top pick", "target_allocation": 5},
+      {"symbol": "ABC", "confidence": 80, "reasoning": "why this is #2", "target_allocation": 4}
+    ],
+    "positions_to_exit": [
+      {"symbol": "OLD", "confidence": 70, "reasoning": "why sell this position"}
+    ],
+    "risk_assessment": "overall portfolio risk level and key concerns",
+    "allocation_strategy": "how to deploy capital effectively"
+  },
+  "individual_scores": {
+    "XYZ": {"sentiment": "bullish", "confidence": 85, "reasoning": "detailed rationale"},
+    "ABC": {"sentiment": "bullish", "confidence": 80, "reasoning": "detailed rationale"}
+  }
+}
+
+Think like Warren Buffett meets Renaissance Technologies - combine fundamental insight with quantitative precision."""
+        
+        return base_profile + portfolio_addition
+    
+    def _extract_key_metrics(self, signals: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract the most important metrics for portfolio decisions."""
+        
+        key_metrics = {}
+        
+        # Price action
+        price = signals.get('price', {})
+        if price:
+            key_metrics['price'] = price.get('close', 0)
+            key_metrics['daily_return'] = price.get('daily_return', 0)
+        
+        # Trend strength
+        trend = signals.get('trend', {})
+        if trend:
+            key_metrics['sma_20'] = trend.get('sma_20', 0)
+            key_metrics['sma_50'] = trend.get('sma_50', 0)
+        
+        # Momentum
+        momentum = signals.get('momentum', {})
+        if momentum:
+            key_metrics['rsi'] = momentum.get('rsi', 50)
+            key_metrics['macd_signal'] = momentum.get('macd_signal', 0)
+        
+        # Volume
+        volume = signals.get('volume', {})
+        if volume:
+            key_metrics['volume_ratio'] = volume.get('volume_ratio', 1)
+        
+        return key_metrics
+    
+    def _parse_portfolio_analysis(self, analysis_text: str) -> Dict[str, Any]:
+        """Parse and validate the portfolio analysis response."""
+        
+        try:
+            # Try to extract JSON from the response
+            if "```json" in analysis_text:
+                json_start = analysis_text.find("```json") + 7
+                json_end = analysis_text.find("```", json_start)
+                json_text = analysis_text[json_start:json_end].strip()
+            else:
+                # Look for JSON-like structure
+                start_idx = analysis_text.find("{")
+                end_idx = analysis_text.rfind("}") + 1
+                if start_idx != -1 and end_idx != -1:
+                    json_text = analysis_text[start_idx:end_idx]
+                else:
+                    raise ValueError("No JSON structure found")
+            
+            parsed = json.loads(json_text)
+            
+            # Validate required structure
+            required_keys = ['portfolio_analysis', 'individual_scores']
+            for key in required_keys:
+                if key not in parsed:
+                    raise ValueError(f"Missing required key: {key}")
+            
+            portfolio = parsed['portfolio_analysis']
+            required_portfolio_keys = ['market_overview', 'best_opportunities', 'risk_assessment']
+            for key in required_portfolio_keys:
+                if key not in portfolio:
+                    logger.warning(f"Missing portfolio key: {key}")
+            
+            return parsed
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to parse portfolio analysis: {e}")
+            return self._get_empty_portfolio_analysis()
+    
+    def _get_empty_portfolio_analysis(self) -> Dict[str, Any]:
+        """Return empty/fallback portfolio analysis structure."""
+        return {
+            'portfolio_analysis': {
+                'market_overview': 'Analysis not available',
+                'best_opportunities': [],
+                'positions_to_exit': [],
+                'risk_assessment': 'Cannot assess - insufficient data',
+                'allocation_strategy': 'Hold current positions'
+            },
+            'individual_scores': {}
+        }
+    
+    def _get_fallback_portfolio_analysis(
+        self, 
+        opportunities: List[Dict[str, Any]], 
+        current_positions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Generate fallback analysis using numerical rules when LLM fails."""
+        
+        logger.info("🔄 Generating fallback portfolio analysis...")
+        
+        # Sort opportunities by composite score
+        sorted_opportunities = sorted(
+            opportunities, 
+            key=lambda x: x.get('composite_score', 0), 
+            reverse=True
+        )
+        
+        # Generate top recommendations
+        best_opportunities = []
+        for opp in sorted_opportunities[:5]:
+            score = opp.get('composite_score', 0)
+            confidence = min(int(score * 100), 95)
+            
+            best_opportunities.append({
+                'symbol': opp.get('symbol', 'Unknown'),
+                'confidence': confidence,
+                'reasoning': f'Top numerical score: {score:.3f}',
+                'target_allocation': 3  # Conservative default
+            })
+        
+        return {
+            'portfolio_analysis': {
+                'market_overview': f'Numerical analysis of {len(opportunities)} opportunities',
+                'best_opportunities': best_opportunities,
+                'positions_to_exit': [],  # Conservative - no sells in fallback
+                'risk_assessment': 'Medium risk - using numerical fallback',
+                'allocation_strategy': 'Conservative position sizing recommended'
+            },
+            'individual_scores': {}
+        }
+    
+    def _log_portfolio_conversation(
+        self, 
+        context: Dict[str, Any], 
+        prompt: str, 
+        response: str, 
+        parsed_analysis: Dict[str, Any]
+    ) -> None:
+        """Log the portfolio analysis conversation."""
+        
+        log_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'type': 'portfolio_batch_analysis',
+            'opportunities_count': len(context.get('opportunities', [])),
+            'positions_count': len(context.get('positions', [])),
+            'prompt': prompt[:1000],  # Truncate for size
+            'raw_response': response[:2000],
+            'parsed_analysis': parsed_analysis,
+            'model': self.model,
+            'profile': self.trading_profile
+        }
+        
+        try:
+            with open(self.conversation_log, 'a') as f:
+                f.write(json.dumps(log_entry) + '\n')
+        except Exception as e:
+            logger.error(f"Failed to log portfolio conversation: {e}")
     
     print("\n" + "="*60)
     print("✅ LLM Bridge test complete!")

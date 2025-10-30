@@ -23,7 +23,7 @@ from typing import List, Dict, Any
 import pandas as pd
 from loguru import logger
 
-from config import settings
+from config.settings import settings
 
 
 class TradingDayReplay:

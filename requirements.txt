@@ -9,6 +9,7 @@ alpaca-py>=0.9.0
 pandas>=2.0.0
 numpy>=1.24.0
 scipy>=1.10.0
+pyarrow>=22.0.0  # For Parquet file support (historical data storage)
 
 # LLM Integration
 lmstudio>=1.5.0  # Official LM Studio Python SDK

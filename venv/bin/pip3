@@ -1,4 +1,4 @@
-#!/Users/wagnermontes/Documents/GitHub/wawatrader/venv/bin/python3.12
+#!/Users/wagnermontes/Documents/GitHub/wawatrader/venv/bin/python3.13
 # -*- coding: utf-8 -*-
 import re
 import sys

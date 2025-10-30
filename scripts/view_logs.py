@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Dict, Any
 from loguru import logger
 
-from config import settings
+from config.settings import settings
 
 
 class LogViewer:
